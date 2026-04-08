@@ -1,3 +1,7 @@
+The goal of this fork is to get step judgement information sent out of a serial port. The purpose for this is to have my dance pad interpret this data and illuminate arrows different colors/patterns depending on the judgment. For instance, fantastic judgements can cause a light blue arrow to appear, whereas excellent judgements can cause a yellow arrow to appear. So on, so forth. I'll probably also incorporate sending beats so I can have the pad further react to music, but that is a secondary objective. This is similar to the illumination on other rhythm games such as Maimai, which has buttons illuminate the color of the last judgement rating.
+
+So It turns out implementing feedback of judgment data for an external LED device is nigh impossible through a theme on ITGMania's Lua runtime alone. io is not included. os is not included. Even "require" is not included. So alas, I need to make changes to ITGMania's source. And since I am going through the effort of making source changes, I'm scrapping the concept of using Lua and I'm making a "proper" C implementation. Note that "proper" is a subjective term, and the implementation will probably be awful. I _should_ make a daemon that will manage a serial port and pump data through some sort of shared memory interface from ITGMania. What I will try doing first is opening, writing, and closing a serial port on each note judgment.
+
 ITGmania
 ========
 
