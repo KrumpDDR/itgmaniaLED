@@ -3505,7 +3505,7 @@ void Player::SetJudgment(
     MESSAGEMAN->Broadcast(msg);
 
     //Send the judgment information to the JudgmentSend thread
-    JudgmentOutputSend(tn, iRow, iTrack, tns, fTapNoteOffset, this->m_pPlayerState->m_PlayerNumber);
+    JudgmentOutputSend(tn, iRow, iTrack, tns, fTapNoteOffset, this->m_pPlayerState->m_PlayerNumber, this->m_pPlayerStageStats->m_pStyle->m_StyleType);
   }
 }
 
