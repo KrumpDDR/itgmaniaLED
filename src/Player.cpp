@@ -64,6 +64,8 @@
 #include "Trail.h"
 #include "global.h"
 
+#include "JudgmentOutput.h"
+
 std::string ATTACK_DISPLAY_X_NAME(size_t p, size_t both_sides);
 void TimingWindowSecondsInit(
     size_t /*TimingWindow*/ i, std::string& sNameOut, float& defaultValueOut);
@@ -342,6 +344,11 @@ Player::Player(NoteData& nd, bool bVisibleParts) : m_NoteData(nd) {
 }
 
 Player::~Player() {
+
+  //stop the Judgment output thread
+  JudgmentOutputShutdown();
+  
+
   RageUtil::SafeDelete(m_pAttackDisplay);
   RageUtil::SafeDelete(m_pNoteField);
   for (unsigned i = 0; i < m_vpHoldJudgment.size(); ++i) {
@@ -612,6 +619,11 @@ void Player::Init(
   std::fill_n(m_vbFretIsDown.begin(), m_vbFretIsDown.size(), false);
 
   m_fActiveRandomAttackStart = -1.0f;
+
+
+  //do the initialization of the judgment serial output thread
+  LuaHelpers::ReportScriptErrorFmt("Player number at thread creation: %d", m_pPlayerState->m_PlayerNumber);
+  JudgmentOutputInit();
 }
 /**
  * @brief Determine if a TapNote needs a tap note style judgment.
@@ -3491,6 +3503,9 @@ void Player::SetJudgment(
 
     LUA->Release(L);
     MESSAGEMAN->Broadcast(msg);
+
+    //Send the judgment information to the JudgmentSend thread
+    JudgmentOutputSend(tn, iRow, iTrack, tns, fTapNoteOffset, this->m_pPlayerState->m_PlayerNumber);
   }
 }
 

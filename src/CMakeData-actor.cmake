@@ -75,7 +75,8 @@ list(APPEND SMDATA_ACTOR_GAMEPLAY_SRC
             "ScoreDisplayNormal.cpp"
             "ScoreDisplayOni.cpp"
             "ScoreDisplayPercentage.cpp"
-            "ScoreDisplayRave.cpp")
+            "ScoreDisplayRave.cpp"
+            "JudgmentOutput.cpp")
 
 list(APPEND SMDATA_ACTOR_GAMEPLAY_HPP
             "ActiveAttackList.h"
@@ -109,7 +110,8 @@ list(APPEND SMDATA_ACTOR_GAMEPLAY_HPP
             "ScoreDisplayNormal.h"
             "ScoreDisplayOni.h"
             "ScoreDisplayPercentage.h"
-            "ScoreDisplayRave.h")
+            "ScoreDisplayRave.h"
+            "JudgmentOutput.h")
 source_group("Actors\\\\Gameplay"
              FILES
              ${SMDATA_ACTOR_GAMEPLAY_SRC}
