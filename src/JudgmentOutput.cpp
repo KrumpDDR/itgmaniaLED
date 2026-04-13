@@ -1,6 +1,10 @@
 #include "JudgmentOutput.h"
 #include "LuaManager.h"
 
+extern "C" {
+#include "serialib.h"
+}
+
 
 //"global" variable that is set when the thread is started.
     //Yes I do realize how stupid it is to use a nonatomic variable for something like this.
@@ -13,6 +17,14 @@ std::queue<JudgmentOutputFrame> m_JudgmentOutputQueue;
 static int JudgmentOutputThread_Main(void* p);
 
 
+//As of right now, the COM ports are hard-coded.
+    //I guess I should probably put them into the config somewhere.
+serialib p1Serial;
+char p1Port[20] = "\\\\.\\COM4\0\0\0";
+serialib p2Serial;
+char p2Port[20] = "\\\\.\\COM8\0\0\0";
+
+
 //Start the thread for doing the serial mumbo jumbo.
 void JudgmentOutputInit() {
     //Do not create the thread again if it's already created
@@ -23,22 +35,23 @@ void JudgmentOutputInit() {
     LuaHelpers::ReportScriptError("!!MAKING THREAD!!");
     
     //Prepare thread items and make it
-    m_JudgmentOutputMutex = new RageEvent("JudgementOutputMutex");
+    if(m_JudgmentOutputMutex == nullptr) {
+        m_JudgmentOutputMutex = new RageEvent("JudgementOutputMutex");
+    }
     m_JudgmentOutputThread.SetName("JudgmentOutput thread");
+    m_JudgmentOutputThread.~RageThread();
     m_JudgmentOutputThread.Create(JudgmentOutputThread_Main, nullptr);
 }
 
 //Stop the thread
 void JudgmentOutputShutdown() {
     //Do not shut down the thread again if it's already shut down
-    if(!m_JudgmentOutputShutdown) return;
+    if(m_JudgmentOutputShutdown) return;
+    m_JudgmentOutputShutdown = true;
 
     
     LuaHelpers::ReportScriptError("!!STOPPING THREAD!!");    
 
-    m_JudgmentOutputShutdown = true;
-
-    
     if (m_JudgmentOutputMutex != nullptr) {
         m_JudgmentOutputMutex->Lock();
         m_JudgmentOutputMutex->Signal();
@@ -47,7 +60,7 @@ void JudgmentOutputShutdown() {
 }
 
 //form the structure and add to the queue, to be processed by the thread.
-void JudgmentOutputSend(TapNote tn, int iRow, int iTrack, TapNoteScore tns, float fTapNoteOffset, uint8_t playerNum, uint8_t styleType, uint8_t msgType = 0) {
+void JudgmentOutputSend(TapNote tn, int iRow, int iTrack, TapNoteScore tns, float fTapNoteOffset, uint8_t playerNum, uint8_t styleType, uint8_t msgType) {
     //pack that data into a struct
         //The ANSI C struct equals operator shoooouulld do what I want here. I think.
     struct JudgmentOutputFrame frame;
@@ -75,6 +88,17 @@ void JudgmentOutputSend(TapNote tn, int iRow, int iTrack, TapNoteScore tns, floa
 static int JudgmentOutputThread_Main(void* p) {
 
     //Setup serial Junk
+    LuaHelpers::ReportScriptError("Initializing serial ports");
+    uint8_t p1Connected = 0;
+    p1Connected = p1Serial.openDevice(p1Port, 115200);
+    if(p1Connected != 1)
+        LuaHelpers::ReportScriptErrorFmt("FAILED TO OPEN SERIAL PORT FOR P1: %d", p1Connected);
+
+    uint8_t p2Connected = 0;
+    p2Connected = p2Serial.openDevice(p1Port, 115200);
+    if(p2Connected != 1)
+        LuaHelpers::ReportScriptErrorFmt("FAILED TO OPEN SERIAL PORT FOR P2: %d", p2Connected);
+
 
 
     while (!m_JudgmentOutputShutdown) {
@@ -148,12 +172,12 @@ static int JudgmentOutputThread_Main(void* p) {
         }
         //send to left pad if it is player 1 and styles are seperate or if iTrack<4 in double
         else if ((out.playerNum == PLAYER_1 && (out.styleType == StyleType_OnePlayerOneSide || out.styleType == StyleType_TwoPlayersTwoSides))
-                    || ((out.styleType == StyleType_TwoPlayersSharedSides || out.styleType == StyleType_TwoPlayersTwoSides) && out.iTrack < 4)) {
+                    || ((out.styleType == StyleType_TwoPlayersSharedSides || out.styleType == StyleType_TwoPlayersTwoSides || out.styleType == StyleType_OnePlayerTwoSides) && out.iTrack < 4)) {
             sendLeft = 1;
         }
         //send to right pad if it is player 2 and styles are seperate or if iTrack >=4 in double
         else if ((out.playerNum == PLAYER_2 && (out.styleType == StyleType_OnePlayerOneSide || out.styleType == StyleType_TwoPlayersTwoSides))
-                    || ((out.styleType == StyleType_TwoPlayersSharedSides || out.styleType == StyleType_TwoPlayersTwoSides) && out.iTrack >= 4)) {
+                    || ((out.styleType == StyleType_TwoPlayersSharedSides || out.styleType == StyleType_TwoPlayersTwoSides || out.styleType == StyleType_OnePlayerTwoSides) && out.iTrack >= 4)) {
             sendRight = 1;
         }
         else { //we should not get here...
@@ -162,16 +186,24 @@ static int JudgmentOutputThread_Main(void* p) {
 
 
         //Send the serial messages
-        if(sendLeft) {
-
+        if(sendLeft && p1Connected == 1) {
+            p1Serial.writeBytes(serialMessage, 8);
         }
-        if(sendRight) {
-            
+        if(sendRight && p2Connected == 1) {
+            p2Serial.writeBytes(serialMessage, 8);
         }
 
     }
 
     //Shutdown serial junk
+    LuaHelpers::ReportScriptError("Closing serial ports");
+    if(p1Connected == 1) {
+        p1Serial.closeDevice();
+    }
+    if(p2Connected == 1) {
+        p2Serial.closeDevice();
+    }
+
 
     return 0;
 }

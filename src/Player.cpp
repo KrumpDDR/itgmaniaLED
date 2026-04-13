@@ -341,6 +341,8 @@ Player::Player(NoteData& nd, bool bVisibleParts) : m_NoteData(nd) {
   m_pJudgedRows = new JudgedRows;
 
   m_bSendJudgmentAndComboMessages = true;
+
+  JudgmentOutputInit();
 }
 
 Player::~Player() {
@@ -623,7 +625,7 @@ void Player::Init(
 
   //do the initialization of the judgment serial output thread
   LuaHelpers::ReportScriptErrorFmt("Player number at thread creation: %d", m_pPlayerState->m_PlayerNumber);
-  JudgmentOutputInit();
+  //JudgmentOutputInit();
 }
 /**
  * @brief Determine if a TapNote needs a tap note style judgment.
@@ -3505,7 +3507,7 @@ void Player::SetJudgment(
     MESSAGEMAN->Broadcast(msg);
 
     //Send the judgment information to the JudgmentSend thread
-    JudgmentOutputSend(tn, iRow, iTrack, tns, fTapNoteOffset, this->m_pPlayerState->m_PlayerNumber, this->m_pPlayerStageStats->m_pStyle->m_StyleType);
+    JudgmentOutputSend(tn, iRow, iTrack, tns, fTapNoteOffset, this->m_pPlayerState->m_PlayerNumber, this->m_pPlayerStageStats->m_pStyle->m_StyleType, 0);
   }
 }
 
