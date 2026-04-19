@@ -17,12 +17,10 @@ std::queue<JudgmentOutputFrame> m_JudgmentOutputQueue;
 static int JudgmentOutputThread_Main(void* p);
 
 
-//As of right now, the COM ports are hard-coded.
-    //I guess I should probably put them into the config somewhere.
+
 serialib p1Serial;
-char p1Port[20] = "\\\\.\\COM4\0\0\0";
 serialib p2Serial;
-char p2Port[20] = "\\\\.\\COM8\0\0\0";
+
 
 
 //Start the thread for doing the serial mumbo jumbo.
@@ -32,7 +30,7 @@ void JudgmentOutputInit() {
 
     m_JudgmentOutputShutdown = false;
 
-    LuaHelpers::ReportScriptError("!!MAKING THREAD!!");
+    //LuaHelpers::ReportScriptError("!!MAKING THREAD!!");
     
     //Prepare thread items and make it
     if(m_JudgmentOutputMutex == nullptr) {
@@ -50,7 +48,7 @@ void JudgmentOutputShutdown() {
     m_JudgmentOutputShutdown = true;
 
     
-    LuaHelpers::ReportScriptError("!!STOPPING THREAD!!");    
+    //LuaHelpers::ReportScriptError("!!STOPPING THREAD!!");    
 
     if (m_JudgmentOutputMutex != nullptr) {
         m_JudgmentOutputMutex->Lock();
@@ -86,18 +84,77 @@ void JudgmentOutputSend(TapNote tn, int iRow, int iTrack, TapNoteScore tns, floa
 
 //judgment output function main thread
 static int JudgmentOutputThread_Main(void* p) {
+    char p1Port[20] = "\\\\.\\COM0\0\0\0";
+    char p2Port[20] = "\\\\.\\COM0\0\0\0";
 
     //Setup serial Junk
-    LuaHelpers::ReportScriptError("Initializing serial ports");
+    //Search for COM ports
+    uint8_t p1Discovered = 0, p2Discovered = 0;
+    for(uint8_t com = 1; com < 100 && !(p1Discovered&&p2Discovered); com++) {
+        serialib tempSerial;
+        char comPort[20] = "\\\\.\\COMX\0\0\0";
+        if(com < 10)
+            comPort[7] = '0' + com;
+        else {
+            comPort[7]  = '0' + (com/10);
+            comPort[8] = '0' + (com%10);
+        }
+        //printf("%s\r\n", comPort);
+        uint8_t connectStatus = tempSerial.openDevice(comPort, 115200);
+        if(connectStatus == 1) { //if COM can be opened
+            //LuaHelpers::ReportScriptErrorFmt("Managed to open COM%d", com);
+            //check if it's an LED device
+            for(uint8_t i = 0; i < 5; i++) {
+                uint8_t serialMessage[8];
+                serialMessage[0] = 'S';
+                serialMessage[1] = 2; //request player number
+                serialMessage[7] = 'E';
+                tempSerial.writeBytes(serialMessage, 8);
+                //Response format will is 2 byes. 'G' and player number
+                uint8_t rb = 0;
+                uint8_t res = tempSerial.readChar((char*)&rb,200);
+                /*if(res == 1)
+                    LuaHelpers::ReportScriptErrorFmt("Read byte 0 from serial: %d", rb);*/
+                if(rb == 'G') {
+                    res = tempSerial.readChar((char*)&rb,200);
+                    /*if(res == 1)
+                        LuaHelpers::ReportScriptErrorFmt("Read byte 1 from serial: %d", rb);*/
+                    if(rb == 0) { //reply of player 1
+                        memcpy(p1Port, comPort, 20);
+                        p1Discovered = 1;
+                        //LuaHelpers::ReportScriptError("Player 1 Serial Discovered");
+                    }
+                    else if(rb == 1) { //reply of player 2
+                        memcpy(p2Port, comPort, 20);
+                        p2Discovered = 1;
+                        //LuaHelpers::ReportScriptError("Player 2 Serial Discovered");
+                    }
+                    else //something bad happened if flow gets here
+                        LuaHelpers::ReportScriptError("Invalid serial search response!");
+                
+                    break;
+                }
+            }
+            if(tempSerial.isDeviceOpen())
+                tempSerial.closeDevice();
+        }
+    }
+
+
+    //LuaHelpers::ReportScriptError("Initializing serial ports");
     uint8_t p1Connected = 0;
-    p1Connected = p1Serial.openDevice(p1Port, 115200);
-    if(p1Connected != 1)
-        LuaHelpers::ReportScriptErrorFmt("FAILED TO OPEN SERIAL PORT FOR P1: %d", p1Connected);
+    if(p1Discovered) {
+        p1Connected = p1Serial.openDevice(p1Port, 115200);
+        if(p1Connected != 1)
+            LuaHelpers::ReportScriptErrorFmt("FAILED TO OPEN SERIAL PORT FOR P1: %d", p1Connected);
+    }
 
     uint8_t p2Connected = 0;
-    p2Connected = p2Serial.openDevice(p1Port, 115200);
-    if(p2Connected != 1)
-        LuaHelpers::ReportScriptErrorFmt("FAILED TO OPEN SERIAL PORT FOR P2: %d", p2Connected);
+    if(p2Discovered) {
+        p2Connected = p2Serial.openDevice(p2Port, 115200);
+        if(p2Connected != 1)
+            LuaHelpers::ReportScriptErrorFmt("FAILED TO OPEN SERIAL PORT FOR P2: %d", p2Connected);
+    }
 
 
 
@@ -138,7 +195,8 @@ static int JudgmentOutputThread_Main(void* p) {
             //Byte 1 - message type
                 //0 - Judgment (gives info on a judgment, to be used for lighting the associated panel)
                 //1 - Downbeat (Signifies that a downbeat just happened. I'm not sure I will actually use this.)
-            //Remaining bytes are only currently used for Judgments (stuff bytes still for Downbeat messages)
+                //2 - Request player number. Used to discover devices so I don't need to hardcode COM port numbers
+            //Remaining bytes are only currently used for Judgments (stuff bytes (reserved) still for other messages)
             //Byte 2 - Tap note type
             //Byte 3 - Tab note subtype
             //Byte 4 - Tap note score
@@ -196,7 +254,7 @@ static int JudgmentOutputThread_Main(void* p) {
     }
 
     //Shutdown serial junk
-    LuaHelpers::ReportScriptError("Closing serial ports");
+    //LuaHelpers::ReportScriptError("Closing serial ports");
     if(p1Connected == 1) {
         p1Serial.closeDevice();
     }
