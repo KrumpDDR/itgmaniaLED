@@ -273,6 +273,13 @@ local RoutineSkins = {
 }
 
 function RoutineSkinP1()
+	local ps = GAMESTATE:GetPlayerState(PLAYER_1)
+	if ps then
+		local skin = ps:GetCurrentPlayerOptions():NoteSkin()
+		if skin and skin ~= "" then
+			return skin
+		end
+	end
 	if RoutineSkins[CurGameName()] then
 		return RoutineSkins[CurGameName()].P1
 	end
@@ -280,6 +287,13 @@ function RoutineSkinP1()
 end
 
 function RoutineSkinP2()
+	local ps = GAMESTATE:GetPlayerState(PLAYER_2)
+	if ps then
+		local skin = ps:GetCurrentPlayerOptions():NoteSkin()
+		if skin and skin ~= "" then
+			return skin
+		end
+	end
 	if RoutineSkins[CurGameName()] then
 		return RoutineSkins[CurGameName()].P2
 	end
@@ -461,6 +475,11 @@ local CodeDetectorCodes = {
 	CancelAllPlayerOptions = {
 		default = "",
 		dance = "Left,Right,Left,Right,Left,Right",
+	},
+	-- operator menu from title screen
+	OperatorMenu = {
+		default = "",
+		dance = "",
 	},
 };
 

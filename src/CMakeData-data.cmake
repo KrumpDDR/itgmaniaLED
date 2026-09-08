@@ -69,22 +69,26 @@ source_group("Data Structures\\\\Courses and Trails"
              ${SM_DATA_COURSE_HPP})
 
 list(APPEND SM_DATA_NOTEDATA_SRC
+            "NoteAnnotation.cpp"
             "NoteData.cpp"
             "NoteDataUtil.cpp"
             "NoteDataWithScoring.cpp"
             "ColumnCues.cpp"
             "TechCounts.cpp"
+            "TechCountsCategory.cpp"
             "MeasureInfo.cpp"
             "StepParityGenerator.cpp"
             "StepParityDatastructs.cpp"
             "StepParityCost.cpp")
 
 list(APPEND SM_DATA_NOTEDATA_HPP
+            "NoteAnnotation.h"
             "NoteData.h"
             "NoteDataUtil.h"
             "NoteDataWithScoring.h"
             "ColumnCues.h"
             "TechCounts.h"
+            "TechCountsCategory.h"
             "MeasureInfo.h"
             "StepParityGenerator.h"
             "StepParityDatastructs.h"
@@ -97,20 +101,16 @@ source_group("Data Structures\\\\Note Data"
 
 list(APPEND SM_DATA_NOTELOAD_SRC
             "NotesLoader.cpp"
-            "NotesLoaderBMS.cpp"
             "NotesLoaderDWI.cpp"
             "NotesLoaderJson.cpp"
-            "NotesLoaderKSF.cpp"
             "NotesLoaderSM.cpp"
             "NotesLoaderSMA.cpp"
             "NotesLoaderSSC.cpp")
 
 list(APPEND SM_DATA_NOTELOAD_HPP
             "NotesLoader.h"
-            "NotesLoaderBMS.h"
             "NotesLoaderDWI.h"
             "NotesLoaderJson.h"
-            "NotesLoaderKSF.h"
             "NotesLoaderSM.h"
             "NotesLoaderSMA.h"
             "NotesLoaderSSC.h")
@@ -205,7 +205,6 @@ list(APPEND SM_DATA_REST_SRC
             "Command.cpp"
             "CommonMetrics.cpp"
             "ControllerStateDisplay.cpp"
-            "CreateZip.cpp"
             "CryptHelpers.cpp"
             "DateTime.cpp"
             "Difficulty.cpp"
@@ -256,7 +255,6 @@ list(APPEND SM_DATA_REST_HPP
             "Command.h"
             "CommonMetrics.h"
             "ControllerStateDisplay.h"
-            "CreateZip.h"
             "CryptHelpers.h"
             "CubicSpline.h"
             "DateTime.h"

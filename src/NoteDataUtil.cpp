@@ -281,21 +281,18 @@ static void LoadFromSMNoteDataStringWithPlayer(
   // Make sure we don't have any hold notes that didn't find a tail.
   for (int t = 0; t < out.GetNumTracks(); t++) {
     NoteData::iterator begin = out.begin(t);
-    NoteData::iterator lEnd = out.end(t);
-    while (begin != lEnd) {
-      NoteData::iterator next = Increment(begin);
+    while (begin != out.end(t)) {
       const TapNote& tn = begin->second;
       if (tn.type == TapNoteType_HoldHead && tn.iDuration == MAX_NOTE_ROW) {
-        int iRow = begin->first;
         LOG->UserLog(
             "", "",
             "While loading .sm/.ssc note data, there was an unmatched 2 at "
             "beat %f",
-            NoteRowToBeat(iRow));
-        out.RemoveTapNote(t, begin);
+            NoteRowToBeat(begin->first));
+        begin = out.RemoveTapNote(t, begin);
+      } else {
+        ++begin;
       }
-
-      begin = next;
     }
   }
   out.RevalidateATIs(std::vector<int>(), false);
@@ -356,11 +353,12 @@ void NoteDataUtil::LoadFromSMNoteDataString(
 
 void NoteDataUtil::InsertHoldTails(NoteData& inout) {
   for (int t = 0; t < inout.GetNumTracks(); t++) {
-    NoteData::iterator begin = inout.begin(t), end = inout.end(t);
-
-    for (; begin != end; ++begin) {
-      int iRow = begin->first;
-      const TapNote& tn = begin->second;
+    /* Collect the tails to insert in a first pass. We can't insert while
+     * iterating, since inserting into the track invalidates our iterators. */
+    std::vector<std::pair<int, TapNote>> tails;
+    for (NoteData::iterator it = inout.begin(t); it != inout.end(t); ++it) {
+      int iRow = it->first;
+      const TapNote& tn = it->second;
       if (tn.type != TapNoteType_HoldHead) {
         continue;
       }
@@ -368,16 +366,21 @@ void NoteDataUtil::InsertHoldTails(NoteData& inout) {
       TapNote tail = tn;
       tail.type = TapNoteType_HoldTail;
 
-      /* If iDuration is 0, we'd end up overwriting the head with the tail
-       * (and invalidating our iterator). Empty hold notes aren't valid. */
+      /* If iDuration is 0, we'd end up overwriting the head with the tail.
+       * Empty hold notes aren't valid. */
       ASSERT(tn.iDuration != 0);
 
-      inout.SetTapNote(t, iRow + tn.iDuration, tail);
+      tails.push_back({iRow + tn.iDuration, tail});
+    }
+
+    for (const std::pair<int, TapNote>& tail : tails) {
+      inout.SetTapNote(t, tail.first, tail.second);
     }
   }
 }
 
-void NoteDataUtil::GetSMNoteDataString(const NoteData& in, std::string& sRet) {
+void NoteDataUtil::GetSMNoteDataString(
+    const NoteData& in, std::string& sRet, bool bIncludeMeasureComments) {
   // Get note data
   std::vector<NoteData> parts;
   float fLastBeat = -1.0f;
@@ -402,7 +405,9 @@ void NoteDataUtil::GetSMNoteDataString(const NoteData& in, std::string& sRet) {
       if (m) {
         sRet.append(1, ',');
       }
-      sRet += ssprintf("  // measure %d\n", m);
+      if (bIncludeMeasureComments) {
+        sRet += ssprintf("  // measure %d\n", m);
+      }
 
       NoteType nt = GetSmallestNoteTypeForMeasure(nd, m);
       int iRowSpacing;
@@ -854,166 +859,6 @@ void NoteDataUtil::LoadTransformedLightsFromTwo(
   NoteDataUtil::RemoveMines(out);
 }
 
-// This kickbox_limb enum should not be used anywhere outside the
-// Autogenkickbox function. -Kyz
-enum kickbox_limb {
-  left_foot,
-  left_fist,
-  right_fist,
-  right_foot,
-  num_kickbox_limbs,
-  invalid_limb = -1
-};
-void NoteDataUtil::AutogenKickbox(
-    const NoteData& in, NoteData& out, const TimingData& timing,
-    StepsType out_type, int nonrandom_seed) {
-  // Each limb has its own list of tracks it is used for.  This allows
-  // abstract handling of the different styles.
-  // By convention, the lower panels are pushed first.  This gives the upper
-  // panels a higher index, which is mnemonically useful.
-  std::vector<std::vector<int>> limb_tracks(num_kickbox_limbs);
-  bool have_feet = true;
-  switch (out_type) {
-    case StepsType_kickbox_human:
-      out.SetNumTracks(4);
-      limb_tracks[left_foot].push_back(0);
-      limb_tracks[left_fist].push_back(1);
-      limb_tracks[right_fist].push_back(2);
-      limb_tracks[right_foot].push_back(3);
-      break;
-    case StepsType_kickbox_quadarm:
-      out.SetNumTracks(4);
-      have_feet = false;
-      limb_tracks[left_fist].push_back(1);
-      limb_tracks[left_fist].push_back(0);
-      limb_tracks[right_fist].push_back(2);
-      limb_tracks[right_fist].push_back(3);
-      break;
-    case StepsType_kickbox_insect:
-      out.SetNumTracks(6);
-      limb_tracks[left_foot].push_back(0);
-      limb_tracks[left_fist].push_back(2);
-      limb_tracks[left_fist].push_back(1);
-      limb_tracks[right_fist].push_back(3);
-      limb_tracks[right_fist].push_back(4);
-      limb_tracks[right_foot].push_back(5);
-      break;
-    case StepsType_kickbox_arachnid:
-      out.SetNumTracks(8);
-      limb_tracks[left_foot].push_back(0);
-      limb_tracks[left_foot].push_back(1);
-      limb_tracks[left_fist].push_back(3);
-      limb_tracks[left_fist].push_back(2);
-      limb_tracks[right_fist].push_back(4);
-      limb_tracks[right_fist].push_back(5);
-      limb_tracks[right_foot].push_back(7);
-      limb_tracks[right_foot].push_back(6);
-      break;
-      DEFAULT_FAIL(out_type);
-  }
-  // prev_limb_panels keeps track of which panel in the track list the limb
-  // hit last.
-  std::vector<size_t> prev_limb_panels(num_kickbox_limbs, 0);
-  std::vector<int> panel_repeat_counts(num_kickbox_limbs, 0);
-  std::vector<int> panel_repeat_goals(num_kickbox_limbs, 0);
-  RandomGen rnd(nonrandom_seed);
-  kickbox_limb prev_limb_used = invalid_limb;
-  // Kicks are only allowed if there is enough setup/recovery time.
-  float kick_recover_time = GAMESTATE->GetAutoGenFarg(0);
-  if (kick_recover_time <= 0.0f) {
-    kick_recover_time = .25f;
-  }
-  float prev_note_time = -1.0f;
-  int rows_done = 0;
-#define RAND_FIST ((rnd() % 2) ? left_fist : right_fist)
-#define RAND_FOOT ((rnd() % 2) ? left_foot : right_foot)
-  FOREACH_NONEMPTY_ROW_ALL_TRACKS(in, r) {
-    // Arbitrary:  Drop everything except taps and hold heads out entirely,
-    // convert holds to tap just the head.
-    bool has_valid_tapnote = false;
-    for (int t = 0; t < in.GetNumTracks(); ++t) {
-      const TapNote& tn = in.GetTapNote(t, r);
-      if (tn.type == TapNoteType_Tap || tn.type == TapNoteType_HoldHead) {
-        has_valid_tapnote = true;
-        break;
-      }
-    }
-    if (!has_valid_tapnote) {
-      continue;
-    }
-    int next_row = r;
-    bool next_has_valid = false;
-    while (!next_has_valid) {
-      if (!in.GetNextTapNoteRowForAllTracks(next_row)) {
-        next_row = -1;
-        next_has_valid = true;
-      } else {
-        for (int t = 0; t < in.GetNumTracks(); ++t) {
-          const TapNote& tn = in.GetTapNote(t, next_row);
-          if (tn.type == TapNoteType_Tap || tn.type == TapNoteType_HoldHead) {
-            next_has_valid = true;
-            break;
-          }
-        }
-      }
-    }
-    float this_note_time = timing.GetElapsedTimeFromBeat(NoteRowToBeat(r));
-    float next_note_time =
-        timing.GetElapsedTimeFromBeat(NoteRowToBeat(next_row));
-    kickbox_limb this_limb = invalid_limb;
-    switch (prev_limb_used) {
-      case invalid_limb:
-        // First limb is arbitrarily always a fist.
-        this_limb = RAND_FIST;
-        break;
-      case left_foot:
-      case right_foot:
-        // Multiple kicks in a row are allowed if they're on the same foot.
-        // Allow the last note to be a kick.
-        // Switch feet if there's enough time.
-        if (next_note_time - this_note_time > kick_recover_time * 2.0f) {
-          this_limb = prev_limb_used == left_foot ? right_foot : left_foot;
-        } else if (
-            (next_note_time - this_note_time > kick_recover_time * .5f ||
-             next_note_time < 0.0f) &&
-            (rnd() % 2)) {
-          this_limb = prev_limb_used;
-        } else {
-          this_limb = RAND_FIST;
-        }
-        break;
-      case left_fist:
-      case right_fist:
-        if (this_note_time - prev_note_time > kick_recover_time &&
-            (next_note_time - this_note_time > kick_recover_time ||
-             next_note_time < 0.0f) &&
-            have_feet) {
-          this_limb = RAND_FOOT;
-        } else {
-          // Alternate fists.
-          this_limb = prev_limb_used == left_fist ? right_fist : left_fist;
-        }
-        break;
-      default:
-        break;
-    }
-    size_t this_panel = prev_limb_panels[this_limb];
-    if (panel_repeat_counts[this_limb] + 1 > panel_repeat_goals[this_limb]) {
-      // Use a different panel.
-      this_panel = (this_panel + 1) % limb_tracks[this_limb].size();
-      panel_repeat_counts[this_limb] = 0;
-      panel_repeat_goals[this_limb] = (rnd() % 8) + 1;
-    }
-    out.SetTapNote(limb_tracks[this_limb][this_panel], r, TAP_ORIGINAL_TAP);
-    ++panel_repeat_counts[this_limb];
-    prev_limb_panels[this_limb] = this_panel;
-    prev_note_time = this_note_time;
-    prev_limb_used = this_limb;
-    ++rows_done;
-  }
-  out.RevalidateATIs(std::vector<int>(), false);
-}
-
 struct recent_note {
   int row;
   int track;
@@ -1358,7 +1203,7 @@ void NoteDataUtil::RemoveAllButPlayer(NoteData& inout, PlayerNumber pn) {
 
     while (i != inout.end(track)) {
       if (i->second.pn != pn && i->second.pn != PLAYER_INVALID) {
-        inout.RemoveTapNote(track, i++);
+        i = inout.RemoveTapNote(track, i);
       } else {
         ++i;
       }
@@ -1607,42 +1452,6 @@ static void GetTrackMapping(
           iTakeFromTrack[5] = 0;
           break;
         }
-        case StepsType_beat_single5: {
-          // scratch is on right (cols 5 and 11) for 5-key
-          iTakeFromTrack[0] = 4;
-          iTakeFromTrack[1] = 3;
-          iTakeFromTrack[2] = 2;
-          iTakeFromTrack[3] = 1;
-          iTakeFromTrack[4] = 0;
-          iTakeFromTrack[5] = 5;
-          iTakeFromTrack[6] = 10;
-          iTakeFromTrack[7] = 9;
-          iTakeFromTrack[8] = 8;
-          iTakeFromTrack[9] = 7;
-          iTakeFromTrack[10] = 6;
-          iTakeFromTrack[11] = 11;
-          break;
-        }
-        case StepsType_beat_single7: {
-          // scratch is on left (cols 0 and 8) for 7-key
-          iTakeFromTrack[0] = 0;
-          iTakeFromTrack[1] = 7;
-          iTakeFromTrack[2] = 6;
-          iTakeFromTrack[3] = 5;
-          iTakeFromTrack[4] = 4;
-          iTakeFromTrack[5] = 3;
-          iTakeFromTrack[6] = 2;
-          iTakeFromTrack[7] = 1;
-          iTakeFromTrack[8] = 8;
-          iTakeFromTrack[9] = 15;
-          iTakeFromTrack[10] = 14;
-          iTakeFromTrack[11] = 13;
-          iTakeFromTrack[12] = 12;
-          iTakeFromTrack[13] = 11;
-          iTakeFromTrack[14] = 10;
-          iTakeFromTrack[15] = 9;
-          break;
-        }
         default:
           needsBackwards = false;
       }
@@ -1669,23 +1478,7 @@ static void GetTrackMapping(
       int iShuffleSeed = GAMESTATE->m_iStageSeed;
       do {
         RandomGen rnd(iShuffleSeed);
-        // ignore turntable in beat mode
-        switch (st) {
-          case StepsType_beat_single5: {
-            std::shuffle(&iTakeFromTrack[0], &iTakeFromTrack[5], rnd);
-            std::shuffle(&iTakeFromTrack[6], &iTakeFromTrack[11], rnd);
-            break;
-          }
-          case StepsType_beat_single7: {
-            std::shuffle(&iTakeFromTrack[1], &iTakeFromTrack[8], rnd);
-            std::shuffle(&iTakeFromTrack[9], &iTakeFromTrack[16], rnd);
-            break;
-          }
-          default: {
-            std::shuffle(&iTakeFromTrack[0], &iTakeFromTrack[NumTracks], rnd);
-            break;
-          }
-        }
+        std::shuffle(&iTakeFromTrack[0], &iTakeFromTrack[NumTracks], rnd);
         iShuffleSeed++;
       } while (!memcmp(
           iOrig, iTakeFromTrack,
@@ -1798,64 +1591,6 @@ static void GetTrackMapping(
               iTakeFromTrack[8] = 0;
               iTakeFromTrack[9] = 1;
               break;
-            case StepsType_kickbox_human:
-              if (iRandChoice == 1) {
-                iTakeFromTrack[0] = 3;
-                iTakeFromTrack[3] = 0;
-              }
-              if (iRandChoice == 2) {
-                iTakeFromTrack[1] = 2;
-                iTakeFromTrack[2] = 1;
-              }
-              break;
-            case StepsType_kickbox_quadarm:
-              if (iRandChoice == 1) {
-                iTakeFromTrack[0] = 1;
-                iTakeFromTrack[1] = 0;
-                iTakeFromTrack[2] = 3;
-                iTakeFromTrack[3] = 2;
-              }
-              if (iRandChoice == 2) {
-                iTakeFromTrack[1] = 2;
-                iTakeFromTrack[2] = 1;
-              }
-              break;
-            case StepsType_kickbox_insect:
-              if (iRandChoice == 1) {
-                iTakeFromTrack[1] = 2;
-                iTakeFromTrack[2] = 1;
-                iTakeFromTrack[3] = 4;
-                iTakeFromTrack[4] = 3;
-              }
-              if (iRandChoice == 2) {
-                iTakeFromTrack[1] = 4;
-                iTakeFromTrack[2] = 3;
-                iTakeFromTrack[3] = 2;
-                iTakeFromTrack[4] = 1;
-              }
-              break;
-            case StepsType_kickbox_arachnid:
-              if (iRandChoice == 1) {
-                iTakeFromTrack[0] = 1;
-                iTakeFromTrack[1] = 0;
-                iTakeFromTrack[2] = 3;
-                iTakeFromTrack[3] = 2;
-                iTakeFromTrack[4] = 5;
-                iTakeFromTrack[5] = 4;
-                iTakeFromTrack[6] = 7;
-                iTakeFromTrack[7] = 6;
-              }
-              if (iRandChoice == 2) {
-                iTakeFromTrack[0] = 6;
-                iTakeFromTrack[1] = 7;
-                iTakeFromTrack[2] = 4;
-                iTakeFromTrack[3] = 5;
-                iTakeFromTrack[4] = 2;
-                iTakeFromTrack[5] = 3;
-                iTakeFromTrack[6] = 0;
-                iTakeFromTrack[7] = 1;
-              }
-              break;
             default:
               break;
           }
@@ -1892,36 +1627,6 @@ static void GetTrackMapping(
           iTakeFromTrack[5] = 4;
           iTakeFromTrack[6] = 7;
           iTakeFromTrack[7] = 6;
-          break;
-        case StepsType_kickbox_human:
-          iTakeFromTrack[0] = 1;
-          iTakeFromTrack[1] = 0;
-          iTakeFromTrack[2] = 3;
-          iTakeFromTrack[3] = 2;
-          break;
-        case StepsType_kickbox_quadarm:
-          iTakeFromTrack[0] = 1;
-          iTakeFromTrack[1] = 0;
-          iTakeFromTrack[2] = 3;
-          iTakeFromTrack[3] = 2;
-          break;
-        case StepsType_kickbox_insect:
-          iTakeFromTrack[0] = 1;
-          iTakeFromTrack[1] = 4;
-          iTakeFromTrack[2] = 3;
-          iTakeFromTrack[3] = 2;
-          iTakeFromTrack[4] = 1;
-          iTakeFromTrack[5] = 4;
-          break;
-        case StepsType_kickbox_arachnid:
-          iTakeFromTrack[0] = 5;
-          iTakeFromTrack[1] = 4;
-          iTakeFromTrack[2] = 5;
-          iTakeFromTrack[3] = 4;
-          iTakeFromTrack[4] = 3;
-          iTakeFromTrack[5] = 2;
-          iTakeFromTrack[6] = 1;
-          iTakeFromTrack[7] = 0;
           break;
         default:
           break;
@@ -3241,7 +2946,7 @@ void NoteDataUtil::RemoveAllTapsOfType(
   for (int t = 0; t < ndInOut.GetNumTracks(); t++) {
     for (NoteData::iterator iter = ndInOut.begin(t); iter != ndInOut.end(t);) {
       if (iter->second.type == typeToRemove) {
-        ndInOut.RemoveTapNote(t, iter++);
+        iter = ndInOut.RemoveTapNote(t, iter);
       } else {
         ++iter;
       }
@@ -3256,7 +2961,7 @@ void NoteDataUtil::RemoveAllTapsExceptForType(
   for (int t = 0; t < ndInOut.GetNumTracks(); t++) {
     for (NoteData::iterator iter = ndInOut.begin(t); iter != ndInOut.end(t);) {
       if (iter->second.type != typeToKeep) {
-        ndInOut.RemoveTapNote(t, iter++);
+        iter = ndInOut.RemoveTapNote(t, iter);
       } else {
         ++iter;
       }

@@ -49,7 +49,7 @@ bool StepParityGenerator::analyzeGraph() {
 void StepParityGenerator::buildStateGraph() {
   // The first node of the graph is beginningState, which represents the time
   // before the first note (and so it's roIndex is considered -1)
-  beginningState = new State();
+  beginningState = allocState();
   startNode = addNode(beginningState, rows[0].second - 1, -1);
 
   std::vector<StepParityNode*> previousNodes;
@@ -72,8 +72,10 @@ void StepParityGenerator::buildStateGraph() {
       float elapsedTime = row.second - initialNode->second;
       for (auto it = permutations->begin(); it != permutations->end(); it++) {
         State* resultState = initResultState(initialNode->state, row, *it);
+        Row* previousRow = i > 0 ? &rows[i - 1] : nullptr;
         float cost = costCalculator.getActionCost(
-            initialNode->state, resultState, rows, *it, i, elapsedTime);
+            initialNode->state, resultState, row, previousRow, *it,
+            elapsedTime);
 
         std::uint64_t key = getStateCacheKey(resultState);
 
@@ -103,7 +105,7 @@ void StepParityGenerator::buildStateGraph() {
 
   // at this point, previousStates holds all of the states for the very last
   // row, which just get connected to the endState
-  endingState = new State();
+  endingState = allocState();
   endNode = addNode(endingState, rows[rows.size() - 1].second + 1, rows.size());
   endNode->totalCost = FLT_MAX;
 
@@ -118,7 +120,7 @@ void StepParityGenerator::buildStateGraph() {
 State* StepParityGenerator::initResultState(
     State* initialState, Row& row, const FootPlacement& columns) {
   if (tmpState == nullptr) {
-    tmpState = new State();
+    tmpState = allocState();
   }
 
   State* resultState = tmpState;
@@ -137,12 +139,12 @@ State* StepParityGenerator::initResultState(
   }
 
   for (unsigned long i = 0; i < columns.size(); i++) {
-    resultState->combinedColumns[i] = NONE;
+    resultState->combinedColumns[i] = Foot_None;
   }
 
   // I tried to condense this, but kept getting the logic messed up
   for (unsigned long i = 0; i < columns.size(); i++) {
-    if (columns[i] == NONE) {
+    if (columns[i] == Foot_None) {
       continue;
     }
     resultState->whatNoteTheFootIsHitting[columns[i]] = i;
@@ -158,7 +160,7 @@ State* StepParityGenerator::initResultState(
   }
 
   for (unsigned long i = 0; i < columns.size(); i++) {
-    if (columns[i] == NONE) {
+    if (columns[i] == Foot_None) {
       continue;
     }
 
@@ -207,32 +209,32 @@ void StepParityGenerator::mergeInitialAndResultPosition(
   for (int i = 0; i < columnCount; i++) {
     // copy in data from columns over the top which overrides it, as long as
     // it's not nothing
-    if (columns[i] != NONE) {
+    if (columns[i] != Foot_None) {
       resultState->combinedColumns[i] = columns[i];
       continue;
     }
 
     // copy in data from initialState, if it wasn't moved
-    if (initialState->combinedColumns[i] == LEFT_HEEL ||
-        initialState->combinedColumns[i] == RIGHT_HEEL) {
+    if (initialState->combinedColumns[i] == Foot_LeftHeel ||
+        initialState->combinedColumns[i] == Foot_RightHeel) {
       if (!resultState->didTheFootMove[initialState->combinedColumns[i]]) {
         resultState->combinedColumns[i] = initialState->combinedColumns[i];
       }
-    } else if (initialState->combinedColumns[i] == LEFT_TOE) {
-      if (!resultState->didTheFootMove[LEFT_TOE] &&
-          !resultState->didTheFootMove[LEFT_HEEL]) {
+    } else if (initialState->combinedColumns[i] == Foot_LeftToe) {
+      if (!resultState->didTheFootMove[Foot_LeftToe] &&
+          !resultState->didTheFootMove[Foot_LeftHeel]) {
         resultState->combinedColumns[i] = initialState->combinedColumns[i];
       }
-    } else if (initialState->combinedColumns[i] == RIGHT_TOE) {
-      if (!resultState->didTheFootMove[RIGHT_TOE] &&
-          !resultState->didTheFootMove[RIGHT_HEEL]) {
+    } else if (initialState->combinedColumns[i] == Foot_RightToe) {
+      if (!resultState->didTheFootMove[Foot_RightToe] &&
+          !resultState->didTheFootMove[Foot_RightHeel]) {
         resultState->combinedColumns[i] = initialState->combinedColumns[i];
       }
     }
   }
 
   for (int i = 0; i < columnCount; i++) {
-    if (resultState->combinedColumns[i] != NONE) {
+    if (resultState->combinedColumns[i] != Foot_None) {
       resultState->whereTheFeetAre[resultState->combinedColumns[i]] = i;
     }
     resultState->combined_mask |=
@@ -295,49 +297,31 @@ std::vector<int> StepParityGenerator::computeCheapestPath() {
   std::reverse(path.begin(), path.end());
   return path;
 }
-void StepParityGenerator::CreateIntermediateNoteData(
-    const NoteData& in, std::vector<IntermediateNoteData>& out) {
+void StepParityGenerator::CreateRows(const NoteData& in) {
   int columnCount = in.GetNumTracks();
+
+  RowCounter counter = RowCounter(columnCount);
 
   NoteData::all_tracks_const_iterator curr_note =
       in.GetTapNoteRangeAllTracks(0, MAX_NOTE_ROW);
 
-  std::vector<IntermediateNoteData> notes;
-
   for (; !curr_note.IsAtEnd(); ++curr_note) {
+    int col = curr_note.Track();
+    int smRow = curr_note.Row();
+
     IntermediateNoteData note;
     note.type = curr_note->type;
     note.subtype = curr_note->subType;
-    note.col = curr_note.Track();
-
-    note.row = curr_note.Row();
-    note.beat = NoteRowToBeat(curr_note.Row());
+    note.beat = NoteRowToBeat(smRow);
     note.second = timing->GetElapsedTimeFromBeat(note.beat);
-
-    note.fake = note.type == TapNoteType_Fake || timing->IsFakeAtRow(note.row);
-    note.warped = timing->IsWarpAtRow(note.row);
-
+    note.fake = note.type == TapNoteType_Fake || timing->IsFakeAtRow(smRow);
+    note.warped = timing->IsWarpAtRow(smRow);
     if (note.type == TapNoteType_HoldHead) {
       note.hold_length = NoteRowToBeat(curr_note->iDuration);
     } else {
       note.hold_length = -1;
     }
 
-    notes.push_back(note);
-  }
-  out.assign(notes.begin(), notes.end());
-}
-
-void StepParityGenerator::CreateRows(const NoteData& in) {
-  int columnCount = in.GetNumTracks();
-
-  RowCounter counter = RowCounter(columnCount);
-
-  std::vector<IntermediateNoteData> noteData;
-
-  CreateIntermediateNoteData(in, noteData);
-
-  for (IntermediateNoteData note : noteData) {
     if (note.type == TapNoteType_Empty ||
         note.type == TapNoteType_AutoKeysound) {
       continue;
@@ -372,15 +356,15 @@ void StepParityGenerator::CreateRows(const NoteData& in) {
        */
       if (note.second == counter.lastColumnSecond && rows.size() > 0) {
         if (note.fake) {
-          counter.nextFakeMines[note.col] = note.second;
+          counter.nextFakeMines[col] = note.second;
         } else {
-          counter.nextMines[note.col] = note.second;
+          counter.nextMines[col] = note.second;
         }
       } else {
         if (note.fake) {
-          counter.fakeMines[note.col] = note.second;
+          counter.fakeMines[col] = note.second;
         } else {
-          counter.mines[note.col] = note.second;
+          counter.mines[col] = note.second;
         }
       }
       continue;
@@ -416,9 +400,9 @@ void StepParityGenerator::CreateRows(const NoteData& in) {
       }
     }
 
-    counter.notes[note.col] = note;
+    counter.notes[col] = note;
     if (note.type == TapNoteType_HoldHead) {
-      counter.activeHolds[note.col] = note;
+      counter.activeHolds[col] = note;
     }
   }
 
@@ -433,10 +417,12 @@ void StepParityGenerator::AddRow(RowCounter& counter) {
 
 Row StepParityGenerator::CreateRow(RowCounter& counter) {
   Row row = Row(columnCount_);
-  row.notes.assign(counter.notes.begin(), counter.notes.end());
-  row.mines.assign(counter.nextMines.begin(), counter.nextMines.end());
-  row.fakeMines.assign(
-      counter.nextFakeMines.begin(), counter.nextFakeMines.end());
+  std::copy(counter.notes.begin(), counter.notes.end(), row.notes.begin());
+  std::copy(
+      counter.nextMines.begin(), counter.nextMines.end(), row.mines.begin());
+  std::copy(
+      counter.nextFakeMines.begin(), counter.nextFakeMines.end(),
+      row.fakeMines.begin());
   row.second = counter.lastColumnSecond;
   row.beat = counter.lastColumnBeat;
 
@@ -485,7 +471,8 @@ std::uint64_t StepParityGenerator::getStateCacheKey(State* state) {
 
 StepParityNode* StepParityGenerator::addNode(
     State* state, float second, int rowIndex) {
-  StepParityNode* newNode = new StepParityNode(state, second, rowIndex);
+  nodePool.emplace_back(state, second, rowIndex);
+  StepParityNode* newNode = &nodePool.back();
   newNode->id = int(nodes.size());
   nodes.push_back(newNode);
   return newNode;

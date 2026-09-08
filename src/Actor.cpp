@@ -232,6 +232,7 @@ Actor::Actor(const Actor& cpy) : MessageSubscriber(cpy) {
   CPY(m_effect_period);
   CPY(m_fEffectOffset);
   CPY(m_EffectClock);
+  CPY(m_tween_uses_effect_delta);
 
   CPY(m_effectColor1);
   CPY(m_effectColor2);
@@ -254,7 +255,11 @@ Actor::Actor(const Actor& cpy) : MessageSubscriber(cpy) {
   CPY(m_fZBias);
   CPY(m_CullMode);
 
+  CPY(rate_scaling_enabled_);
   CPY(m_mapNameToCommands);
+
+  CPY(m_tween_uses_effect_delta);
+  CPY(rate_scaling_enabled_);
 #undef CPY
 }
 
@@ -326,6 +331,9 @@ Actor& Actor::operator=(Actor other) {
   SWAP(m_CullMode);
 
   SWAP(m_mapNameToCommands);
+
+  SWAP(m_tween_uses_effect_delta);
+  SWAP(rate_scaling_enabled_);
 #undef SWAP
   return *this;
 }

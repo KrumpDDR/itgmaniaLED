@@ -1,5 +1,8 @@
 #include "ArchHooks_Unix.h"
 
+#include <sys/wait.h>
+#include <unistd.h>
+
 #include <csignal>
 #include <cstdint>
 #include <cstdlib>
@@ -9,22 +12,13 @@
 #include "RageFileManager.h"
 #include "RageLog.h"
 #include "RageUtil.h"
-#include "archutils/Common/PthreadHelpers.h"
 #include "archutils/Unix/AssertionHandler.h"
+#include "archutils/Unix/CrashHandler.h"
 #include "archutils/Unix/EmergencyShutdown.h"
 #include "archutils/Unix/GetSysInfo.h"
 #include "archutils/Unix/SignalHandler.h"
-
-#if defined(HAVE_UNISTD_H)
-#include <unistd.h>
-#endif
-#include <sys/wait.h>
-
-#if defined(CRASH_HANDLER)
-#include "archutils/Unix/CrashHandler.h"
 #if defined(LINUX)
 #include <limits.h>
-#endif
 #endif
 
 extern "C" {
@@ -59,7 +53,6 @@ static bool DoCleanShutdown(int signal, siginfo_t* si, const ucontext_t* uc) {
   return true;
 }
 
-#if defined(CRASH_HANDLER)
 static bool DoCrashSignalHandler(
     int signal, siginfo_t* si, const ucontext_t* uc) {
   /* Don't dump a debug file if the user just hit ^C. */
@@ -70,7 +63,6 @@ static bool DoCrashSignalHandler(
   CrashHandler::CrashSignalHandler(signal, si, uc);
   return false;
 }
-#endif
 
 static bool EmergencyShutdown(int signal, siginfo_t* si, const ucontext_t* uc) {
   if (!IsFatalSignal(signal)) {
@@ -79,44 +71,13 @@ static bool EmergencyShutdown(int signal, siginfo_t* si, const ucontext_t* uc) {
 
   DoEmergencyShutdown();
 
-#if defined(CRASH_HANDLER)
   /* If we ran the crash handler, then die. */
   kill(getpid(), SIGKILL);
-#endif
 
   /* We didn't run the crash handler.  Run the default handler, so we can dump
    * core. */
   return false;
 }
-
-#if defined(HAVE_TLS)
-static thread_local int g_iTestTLS = 0;
-
-static int TestTLSThread(void* p) {
-  g_iTestTLS = 2;
-  return 0;
-}
-
-static void TestTLS() {
-#if defined(LINUX)
-  /* TLS won't work on older threads libraries, and may crash. */
-  if (!UsingNPTL()) {
-    return;
-  }
-#endif
-  /* TLS won't work on older Linux kernels.  Do a simple check. */
-  g_iTestTLS = 1;
-
-  RageThread TestThread;
-  TestThread.SetName("TestTLS");
-  TestThread.Create(TestTLSThread, nullptr);
-  TestThread.Wait();
-
-  if (g_iTestTLS == 1) {
-    RageThread::SetSupportsTLS(true);
-  }
-}
-#endif
 
 #if 1
 /* If librt is available, use CLOCK_MONOTONIC to implement
@@ -198,21 +159,15 @@ void ArchHooks_Unix::Init() {
   /* First, handle non-fatal termination signals. */
   SignalHandler::OnClose(DoCleanShutdown);
 
-#if defined(CRASH_HANDLER)
   CrashHandler::CrashHandlerHandleArgs(g_argc, g_argv);
   CrashHandler::InitializeCrashHandler();
   SignalHandler::OnClose(DoCrashSignalHandler);
-#endif
 
   /* Set up EmergencyShutdown, to try to shut down the window if we crash.
    * This might blow up, so be sure to do it after the crash handler. */
   SignalHandler::OnClose(EmergencyShutdown);
 
   InstallExceptionHandler();
-
-#if defined(HAVE_TLS) && !defined(BSD)
-  TestTLS();
-#endif
 }
 
 #ifndef _CS_GNU_LIBC_VERSION
@@ -235,16 +190,13 @@ void ArchHooks_Unix::DumpDebugInfo() {
   GetKernel(sys, vers);
   LOG->Info("OS: %s ver %06i", sys.c_str(), vers);
 
-#if defined(CRASH_HANDLER)
   LOG->Info("Crash backtrace component: %s", BACKTRACE_METHOD_TEXT);
   LOG->Info("Crash lookup component: %s", BACKTRACE_LOOKUP_METHOD_TEXT);
 #if defined(BACKTRACE_DEMANGLE_METHOD_TEXT)
   LOG->Info("Crash demangle component: %s", BACKTRACE_DEMANGLE_METHOD_TEXT);
 #endif
-#endif
 
   LOG->Info("Runtime library: %s", LibcVersion().c_str());
-  LOG->Info("Threads library: %s", ThreadsVersion().c_str());
   LOG->Info("libavcodec: %#x (%u)", avcodec_version(), avcodec_version());
 }
 

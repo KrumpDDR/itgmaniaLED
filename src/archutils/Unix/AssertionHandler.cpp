@@ -1,14 +1,12 @@
+#include <assert.h>
+
 #include <cstring>
 #include <exception>
+#include <string>
 
 #include "RageThreads.h"
 #include "RageUtil.h"
 #include "global.h"
-#if defined(HAVE_UNISTD_H)
-#endif
-#include <assert.h>
-
-#include <string>
 
 /* We can define this symbol to catch failed assert() calls.  This is only used
  * for library code that uses assert(); internally we always use ASSERT, which
@@ -20,17 +18,8 @@ extern "C" void __assert_fail(
   const std::string error =
       ssprintf("Assertion failure: %s: %s", function, assertion);
 
-#if defined(CRASH_HANDLER)
   Checkpoints::SetCheckpoint(file, line, error);
   sm_crash(assertion);
-#else
-  /* It'd be nice to just throw an exception here, but throwing an exception
-   * through C code sometimes explodes. */
-
-  DoEmergencyShutdown();
-
-  _exit(0);
-#endif
 }
 
 extern "C" void __assert_perror_fail(
@@ -39,15 +28,8 @@ extern "C" void __assert_perror_fail(
   const std::string error =
       ssprintf("Assertion failure: %s: %s", function, strerror(errnum));
 
-#if defined(CRASH_HANDLER)
   Checkpoints::SetCheckpoint(file, line, error);
   sm_crash(strerror(errnum));
-#else
-
-  DoEmergencyShutdown();
-
-  _exit(0);
-#endif
 }
 
 /* Catch unhandled C++ exceptions.  Note that this works in g++ even with
@@ -58,17 +40,13 @@ void UnexpectedExceptionHandler() {
   try {
     std::rethrow_exception(exptr);
   } catch (std::exception& ex) {
-#if defined(CRASH_HANDLER)
     const std::string error = ssprintf("Unhandled exception: %s", ex.what());
     sm_crash(error);
-#endif
   }
   // TODO: Don't throw anything not subclassing std::exception
   catch (...) {
-#if defined(CRASH_HANDLER)
     const std::string error = ssprintf("Unknown exception.");
     sm_crash(error);
-#endif
   }
 }
 

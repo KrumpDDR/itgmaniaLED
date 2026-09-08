@@ -8,17 +8,24 @@
 
 #include <CoreServices/CoreServices.h>
 #include <os/log.h>
-#include <sys/types.h>
-#if defined(HAVE_UNISTD_H)
-#include <unistd.h>
-#endif
 #include <sys/sysctl.h>
+#include <sys/types.h>
+#include <unistd.h>
 
 #import <Foundation/Foundation.h>
 
 std::string CrashHandler::GetLogsDirectory() {
   NSFileManager* fileManager = [NSFileManager defaultManager];
-  NSURL* url = [fileManager URLForDirectory:NSLibraryDirectory
+
+  NSString* bundleParent = [[[NSBundle mainBundle] bundlePath] stringByDeletingLastPathComponent];
+  NSString* portablePath = [bundleParent stringByAppendingPathComponent:@"Portable.ini"];
+
+  BOOL isPortable = [fileManager fileExistsAtPath:portablePath];
+  if (isPortable) {
+    return std::string([bundleParent UTF8String]) + "/Logs";
+  }
+
+  NSURL* url = [fileManager URLForDirectory:NSApplicationSupportDirectory
                                    inDomain:NSUserDomainMask
                           appropriateForURL:nil
                                      create:NO
@@ -27,8 +34,7 @@ std::string CrashHandler::GetLogsDirectory() {
     return "/tmp";
   }
 
-  std::string path = std::string([url fileSystemRepresentation]) + "/Logs/" PRODUCT_ID;
-  return std::string(path.c_str());
+  return std::string([url fileSystemRepresentation]) + "/" + PRODUCT_ID + "/Logs";
 }
 
 // XXX Can we use LocalizedString here instead?

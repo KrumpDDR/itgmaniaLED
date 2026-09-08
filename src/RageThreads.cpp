@@ -16,17 +16,11 @@
 #include "arch/Threads/Threads.h"
 #include "global.h"
 
-#if defined(CRASH_HANDLER)
 #if defined(_WIN32)
 #include "archutils/Win32/crash.h"
 #elif defined(LINUX) || defined(MACOSX)
 #include "archutils/Unix/CrashHandler.h"
 #endif
-#endif
-
-/* Assume TLS doesn't work until told otherwise.  It's ArchHooks's job to set
- * this. */
-bool RageThread::s_bSystemSupportsTLS = false;
 
 // Set in Dialog.cpp via SetIsShowingDialog, but read in RageThread.cpp.
 std::atomic<bool> RageThread::s_bIsShowingDialog(false);
@@ -629,7 +623,6 @@ void RageMutex::Lock() {
         "Thread deadlock on mutex %s between %s and %s", GetName().c_str(),
         ThisSlotName.c_str(), OtherSlotName.c_str());
 
-#if defined(CRASH_HANDLER)
     /* Don't leave GetThreadSlotsLock() locked when we call
      * ForceCrashHandlerDeadlock. */
     GetThreadSlotsLock().Lock();
@@ -639,9 +632,6 @@ void RageMutex::Lock() {
     /* Pass the crash handle of the other thread, so it can backtrace that
      * thread. */
     CrashHandler::ForceDeadlock(sReason, CrashHandle);
-#else
-    FAIL_M(sReason);
-#endif
   }
 
   m_LockedBy = iThisThreadId;
@@ -778,11 +768,7 @@ void RageSemaphore::Wait(bool bFailOnTimeout) {
       ThisSlot ? ThisSlot->GetThreadName()
                : "(???"
                  ")");  // stupid trigraph warnings
-#if defined(CRASH_HANDLER)
   CrashHandler::ForceDeadlock(sReason, GetInvalidThreadId());
-#else
-  RageException::Throw("%s", sReason.c_str());
-#endif
 }
 
 bool RageSemaphore::TryWait() { return m_pSema->TryWait(); }

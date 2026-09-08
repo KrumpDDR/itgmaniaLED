@@ -22,66 +22,60 @@ bool isEmpty(const std::vector<T>& vec, int columnCount) {
 }  // namespace
 
 float StepParityCost::getActionCost(
-    State* initialState, State* resultState, std::vector<Row>& rows,
-    const FootPlacement& columns, int rowIndex, float elapsedTime) {
-  Row& row = rows[rowIndex];
+    const State* initialState, const State* resultState, const Row& row,
+    const Row* previousRow, const FootPlacement& columns, float elapsedTime) {
   int columnCount = row.columnCount;
 
   float cost = 0;
 
   // Mine weighting
-  int leftHeel = resultState->whatNoteTheFootIsHitting[LEFT_HEEL];
-  int leftToe = resultState->whatNoteTheFootIsHitting[LEFT_TOE];
-  int rightHeel = resultState->whatNoteTheFootIsHitting[RIGHT_HEEL];
-  int rightToe = resultState->whatNoteTheFootIsHitting[RIGHT_TOE];
+  int leftHeel = resultState->whatNoteTheFootIsHitting[Foot_LeftHeel];
+  int leftToe = resultState->whatNoteTheFootIsHitting[Foot_LeftToe];
+  int rightHeel = resultState->whatNoteTheFootIsHitting[Foot_RightHeel];
+  int rightToe = resultState->whatNoteTheFootIsHitting[Foot_RightToe];
 
-  bool movedLeft = resultState->didTheFootMove[LEFT_HEEL] ||
-                   resultState->didTheFootMove[LEFT_TOE];
+  bool movedLeft = resultState->didTheFootMove[Foot_LeftHeel] ||
+                   resultState->didTheFootMove[Foot_LeftToe];
 
-  bool movedRight = resultState->didTheFootMove[RIGHT_HEEL] ||
-                    resultState->didTheFootMove[RIGHT_TOE];
+  bool movedRight = resultState->didTheFootMove[Foot_RightHeel] ||
+                    resultState->didTheFootMove[Foot_RightToe];
 
   // Note that this is checking whether the previous state was a jump, not
   // whether the current state is
-  bool didJump = ((initialState->didTheFootMove[LEFT_HEEL] &&
-                   !initialState->isTheFootHolding[LEFT_HEEL]) ||
-                  (initialState->didTheFootMove[LEFT_TOE] &&
-                   !initialState->isTheFootHolding[LEFT_TOE])) &&
-                 ((initialState->didTheFootMove[RIGHT_HEEL] &&
-                   !initialState->isTheFootHolding[RIGHT_HEEL]) ||
-                  (initialState->didTheFootMove[RIGHT_TOE] &&
-                   !initialState->isTheFootHolding[RIGHT_TOE]));
+  bool didJump = ((initialState->didTheFootMove[Foot_LeftHeel] &&
+                   !initialState->isTheFootHolding[Foot_LeftHeel]) ||
+                  (initialState->didTheFootMove[Foot_LeftToe] &&
+                   !initialState->isTheFootHolding[Foot_LeftToe])) &&
+                 ((initialState->didTheFootMove[Foot_RightHeel] &&
+                   !initialState->isTheFootHolding[Foot_RightHeel]) ||
+                  (initialState->didTheFootMove[Foot_RightToe] &&
+                   !initialState->isTheFootHolding[Foot_RightToe]));
 
   bool jackedLeft = didJackLeft(
-      initialState, resultState, leftHeel, leftToe, movedLeft, didJump,
-      columnCount);
+      initialState, resultState, leftHeel, leftToe, movedLeft, didJump);
   bool jackedRight = didJackRight(
-      initialState, resultState, rightHeel, rightToe, movedRight, didJump,
-      columnCount);
+      initialState, resultState, rightHeel, rightToe, movedRight, didJump);
 
   cost += calcMineCost(resultState, row, columnCount);
   cost += calcHoldSwitchCost(initialState, resultState, row, columnCount);
   cost += calcBracketTapCost(
-      initialState, resultState, row, leftHeel, leftToe, rightHeel, rightToe,
-      elapsedTime, columnCount);
+      initialState, row, leftHeel, leftToe, rightHeel, rightToe, elapsedTime);
   cost += calcBracketJackCost(
-      initialState, resultState, rows, rowIndex, movedLeft, movedRight,
-      jackedLeft, jackedRight, didJump, columnCount);
+      resultState, movedLeft, movedRight, jackedLeft, jackedRight, didJump);
   cost += calcDoublestepCost(
-      initialState, resultState, rows, rowIndex, movedLeft, movedRight,
-      jackedLeft, jackedRight, didJump, columnCount);
+      initialState, resultState, row, previousRow, movedLeft, movedRight,
+      jackedLeft, jackedRight, didJump);
   cost += calcSlowBracketCost(row, movedLeft, movedRight, elapsedTime);
   cost += calcTwistedFootCost(resultState);
-  cost += calcFacingCosts(initialState, resultState, columnCount);
-  cost += calcSpinCosts(initialState, resultState, columnCount);
+  cost += calcFacingCosts(resultState);
+  cost += calcSpinCosts(initialState, resultState);
   cost +=
       calcFootswitchCost(initialState, columns, row, elapsedTime, columnCount);
-  cost += calcSideswitchCost(initialState, resultState, columns, columnCount);
-  cost += calcMissedFootswitchCost(row, jackedLeft, jackedRight, columnCount);
-  cost += calcJackCost(
-      movedLeft, movedRight, jackedLeft, jackedRight, elapsedTime, columnCount);
-  cost += calcBigMovementsQuicklyCost(
-      initialState, resultState, elapsedTime, columnCount);
+  cost += calcSideswitchCost(initialState, resultState, columns);
+  cost += calcMissedFootswitchCost(row, jackedLeft, jackedRight);
+  cost +=
+      calcJackCost(movedLeft, movedRight, jackedLeft, jackedRight, elapsedTime);
+  cost += calcBigMovementsQuicklyCost(initialState, resultState, elapsedTime);
 
   return cost;
 }
@@ -95,14 +89,14 @@ float StepParityCost::getActionCost(
 // 00M0
 // 0100 <- no cost
 float StepParityCost::calcMineCost(
-    State* resultState, Row& row, int columnCount) {
+    const State* resultState, const Row& row, int columnCount) {
   if (row.mine_mask == 0 && row.fake_mine_mask == 0) {
     return 0.0f;
   }
   float cost = 0;
 
   for (int i = 0; i < columnCount; i++) {
-    if (resultState->combinedColumns[i] != NONE &&
+    if (resultState->combinedColumns[i] != Foot_None &&
         (row.mines[i] != 0 || row.fakeMines[i] != 0)) {
       cost += MINE;
       break;
@@ -117,7 +111,8 @@ float StepParityCost::calcMineCost(
 // If the initial foot doesn't move anywhere, then don't mulitply it by
 // anything.
 float StepParityCost::calcHoldSwitchCost(
-    State* initialState, State* resultState, Row& row, int columnCount) {
+    const State* initialState, const State* resultState, const Row& row,
+    int columnCount) {
   if (row.hold_mask == 0) {
     return 0.0f;
   }
@@ -128,14 +123,14 @@ float StepParityCost::calcHoldSwitchCost(
     if (row.holds[c].type == TapNoteType_Empty) {
       continue;
     }
-    if (((resultState->combinedColumns[c] == LEFT_HEEL ||
-          resultState->combinedColumns[c] == LEFT_TOE) &&
-         initialState->combinedColumns[c] != LEFT_TOE &&
-         initialState->combinedColumns[c] != LEFT_HEEL) ||
-        ((resultState->combinedColumns[c] == RIGHT_HEEL ||
-          resultState->combinedColumns[c] == RIGHT_TOE) &&
-         initialState->combinedColumns[c] != RIGHT_TOE &&
-         initialState->combinedColumns[c] != RIGHT_HEEL)) {
+    if (((resultState->combinedColumns[c] == Foot_LeftHeel ||
+          resultState->combinedColumns[c] == Foot_LeftToe) &&
+         initialState->combinedColumns[c] != Foot_LeftToe &&
+         initialState->combinedColumns[c] != Foot_LeftHeel) ||
+        ((resultState->combinedColumns[c] == Foot_RightHeel ||
+          resultState->combinedColumns[c] == Foot_RightToe) &&
+         initialState->combinedColumns[c] != Foot_RightToe &&
+         initialState->combinedColumns[c] != Foot_RightHeel)) {
       int previousFoot =
           initialState->whereTheFeetAre[resultState->combinedColumns[c]];
       cost += HOLDSWITCH * (previousFoot == INVALID_COLUMN
@@ -155,9 +150,8 @@ float StepParityCost::calcHoldSwitchCost(
 // 0300
 
 float StepParityCost::calcBracketTapCost(
-    State* initialState, State* resultState, Row& row, int leftHeel,
-    int leftToe, int rightHeel, int rightToe, float elapsedTime,
-    int columnCount) {
+    const State* initialState, const Row& row, int leftHeel, int leftToe,
+    int rightHeel, int rightToe, float elapsedTime) {
   if (row.hold_mask == 0) {
     return 0.0f;
   }
@@ -166,8 +160,8 @@ float StepParityCost::calcBracketTapCost(
   float cost = 0;
   if (leftHeel != INVALID_COLUMN && leftToe != INVALID_COLUMN) {
     float jackPenalty = 1;
-    if (initialState->didTheFootMove[LEFT_HEEL] ||
-        initialState->didTheFootMove[LEFT_TOE]) {
+    if (initialState->didTheFootMove[Foot_LeftHeel] ||
+        initialState->didTheFootMove[Foot_LeftToe]) {
       jackPenalty = 1 / elapsedTime;
     }
     if (row.holds[leftHeel].type != TapNoteType_Empty &&
@@ -182,8 +176,8 @@ float StepParityCost::calcBracketTapCost(
 
   if (rightHeel != INVALID_COLUMN && rightToe != INVALID_COLUMN) {
     float jackPenalty = 1;
-    if (initialState->didTheFootMove[RIGHT_TOE] ||
-        initialState->didTheFootMove[RIGHT_HEEL]) {
+    if (initialState->didTheFootMove[Foot_RightToe] ||
+        initialState->didTheFootMove[Foot_RightHeel]) {
       jackPenalty = 1 / elapsedTime;
     }
 
@@ -200,63 +194,47 @@ float StepParityCost::calcBracketTapCost(
 }
 
 float StepParityCost::calcBracketJackCost(
-    State* initialState, State* resultState, std::vector<Row>& rows,
-    int rowIndex, bool movedLeft, bool movedRight, bool jackedLeft,
-    bool jackedRight, bool didJump, int columnCount) {
+    const State* resultState, bool movedLeft, bool movedRight, bool jackedLeft,
+    bool jackedRight, bool didJump) {
   if (movedLeft == movedRight || resultState->holding_mask != 0 || didJump) {
     return 0.0f;
   }
   float cost = 0;
 
-  if (jackedLeft && resultState->didTheFootMove[LEFT_HEEL] &&
-      resultState->didTheFootMove[LEFT_TOE]) {
+  if (jackedLeft && resultState->didTheFootMove[Foot_LeftHeel] &&
+      resultState->didTheFootMove[Foot_LeftToe]) {
     cost += BRACKETJACK;
   }
 
-  if (jackedRight && resultState->didTheFootMove[RIGHT_HEEL] &&
-      resultState->didTheFootMove[RIGHT_TOE]) {
+  if (jackedRight && resultState->didTheFootMove[Foot_RightHeel] &&
+      resultState->didTheFootMove[Foot_RightToe]) {
     cost += BRACKETJACK;
   }
   return cost;
 }
 
 float StepParityCost::calcDoublestepCost(
-    State* initialState, State* resultState, std::vector<Row>& rows,
-    int rowIndex, bool movedLeft, bool movedRight, bool jackedLeft,
-    bool jackedRight, bool didJump, int columnCount) {
+    const State* initialState, const State* resultState, const Row& row,
+    const Row* previousRow, bool movedLeft, bool movedRight, bool jackedLeft,
+    bool jackedRight, bool didJump) {
   if ((movedLeft == movedRight) || resultState->holding_mask != 0 || didJump) {
     return 0.0f;
   }
 
   float cost = 0;
   bool doublestepped = didDoubleStep(
-      initialState, resultState, rows, rowIndex, movedLeft, jackedLeft,
-      movedRight, jackedRight, columnCount);
+      initialState, row, previousRow, movedLeft, jackedLeft, movedRight,
+      jackedRight);
 
   if (doublestepped) {
     cost += DOUBLESTEP;
   }
   return cost;
 }
-float StepParityCost::calcJumpCost(
-    Row& row, bool movedLeft, bool movedRight, float elapsedTime,
-    int columnCount) {
-  float cost = 0;
-  if (movedLeft && movedRight &&
-      std::count_if(
-          row.notes.begin(), row.notes.end(),
-          [](StepParity::IntermediateNoteData note) {
-            return note.type != TapNoteType_Empty;
-          }) >= 2) {
-    cost += JUMP / elapsedTime;
-  }
-
-  return cost;
-}
 
 // Jumps should be prioritized over brackets below a certain speed
 float StepParityCost::calcSlowBracketCost(
-    Row& row, bool movedLeft, bool movedRight, float elapsedTime) {
+    const Row& row, bool movedLeft, bool movedRight, float elapsedTime) {
   float cost = 0;
   if (elapsedTime > SLOW_BRACKET_THRESHOLD && movedLeft != movedRight &&
       std::count_if(
@@ -273,12 +251,12 @@ float StepParityCost::calcSlowBracketCost(
 // Does this placement result in one of the feet being twisted around?
 // This should probably be getting filtered out as an invalid positioning before
 // we even get to calculating costs.
-float StepParityCost::calcTwistedFootCost(State* resultState) {
+float StepParityCost::calcTwistedFootCost(const State* resultState) {
   float cost = 0;
-  int leftHeel = resultState->whatNoteTheFootIsHitting[LEFT_HEEL];
-  int leftToe = resultState->whatNoteTheFootIsHitting[LEFT_TOE];
-  int rightHeel = resultState->whatNoteTheFootIsHitting[RIGHT_HEEL];
-  int rightToe = resultState->whatNoteTheFootIsHitting[RIGHT_TOE];
+  int leftHeel = resultState->whatNoteTheFootIsHitting[Foot_LeftHeel];
+  int leftToe = resultState->whatNoteTheFootIsHitting[Foot_LeftToe];
+  int rightHeel = resultState->whatNoteTheFootIsHitting[Foot_RightHeel];
+  int rightToe = resultState->whatNoteTheFootIsHitting[Foot_RightToe];
 
   StagePoint leftPos = layout->averagePoint(leftHeel, leftToe);
   StagePoint rightPos = layout->averagePoint(rightHeel, rightToe);
@@ -300,7 +278,7 @@ float StepParityCost::calcTwistedFootCost(State* resultState) {
 }
 
 float StepParityCost::calcMissedFootswitchCost(
-    Row& row, bool jackedLeft, bool jackedRight, int columnCount) {
+    const Row& row, bool jackedLeft, bool jackedRight) {
   float cost = 0;
   if ((jackedLeft || jackedRight) &&
       (row.mine_mask != 0 || row.fake_mine_mask != 0)) {
@@ -309,12 +287,11 @@ float StepParityCost::calcMissedFootswitchCost(
   return cost;
 }
 
-float StepParityCost::calcFacingCosts(
-    State* initialState, State* resultState, int columnCount) {
-  int endLeftHeel = resultState->whereTheFeetAre[LEFT_HEEL];
-  int endLeftToe = resultState->whereTheFeetAre[LEFT_TOE];
-  int endRightHeel = resultState->whereTheFeetAre[RIGHT_HEEL];
-  int endRightToe = resultState->whereTheFeetAre[RIGHT_TOE];
+float StepParityCost::calcFacingCosts(const State* resultState) {
+  int endLeftHeel = resultState->whereTheFeetAre[Foot_LeftHeel];
+  int endLeftToe = resultState->whereTheFeetAre[Foot_LeftToe];
+  int endRightHeel = resultState->whereTheFeetAre[Foot_RightHeel];
+  int endRightToe = resultState->whereTheFeetAre[Foot_RightToe];
 
   if (endLeftToe == INVALID_COLUMN) {
     endLeftToe = endLeftHeel;
@@ -338,13 +315,13 @@ float StepParityCost::calcFacingCosts(
 }
 
 float StepParityCost::calcSpinCosts(
-    State* initialState, State* resultState, int columnCount) {
+    const State* initialState, const State* resultState) {
   float cost = 0;
 
-  int endLeftHeel = resultState->whereTheFeetAre[LEFT_HEEL];
-  int endLeftToe = resultState->whereTheFeetAre[LEFT_TOE];
-  int endRightHeel = resultState->whereTheFeetAre[RIGHT_HEEL];
-  int endRightToe = resultState->whereTheFeetAre[RIGHT_TOE];
+  int endLeftHeel = resultState->whereTheFeetAre[Foot_LeftHeel];
+  int endLeftToe = resultState->whereTheFeetAre[Foot_LeftToe];
+  int endRightHeel = resultState->whereTheFeetAre[Foot_RightHeel];
+  int endRightToe = resultState->whereTheFeetAre[Foot_RightToe];
 
   if (endLeftToe == INVALID_COLUMN) {
     endLeftToe = endLeftHeel;
@@ -355,11 +332,11 @@ float StepParityCost::calcSpinCosts(
 
   // spin
   StagePoint previousLeftPos = layout->averagePoint(
-      initialState->whereTheFeetAre[LEFT_HEEL],
-      initialState->whereTheFeetAre[LEFT_TOE]);
+      initialState->whereTheFeetAre[Foot_LeftHeel],
+      initialState->whereTheFeetAre[Foot_LeftToe]);
   StagePoint previousRightPos = layout->averagePoint(
-      initialState->whereTheFeetAre[RIGHT_HEEL],
-      initialState->whereTheFeetAre[RIGHT_TOE]);
+      initialState->whereTheFeetAre[Foot_RightHeel],
+      initialState->whereTheFeetAre[Foot_RightToe]);
   StagePoint leftPos = layout->averagePoint(endLeftHeel, endLeftToe);
   StagePoint rightPos = layout->averagePoint(endRightHeel, endRightToe);
 
@@ -377,7 +354,7 @@ float StepParityCost::calcSpinCosts(
 // Footswitches are harder to do when they get too slow.
 // Notes with an elapsed time greater than this will incur a penalty
 float StepParityCost::calcFootswitchCost(
-    State* initialState, const FootPlacement& columns, Row& row,
+    const State* initialState, const FootPlacement& columns, const Row& row,
     float elapsedTime, int columnCount) {
   if (elapsedTime < SLOW_FOOTSWITCH_THRESHOLD ||
       elapsedTime >= SLOW_FOOTSWITCH_IGNORE) {
@@ -393,7 +370,8 @@ float StepParityCost::calcFootswitchCost(
   float timeScaled = elapsedTime - SLOW_FOOTSWITCH_THRESHOLD;
 
   for (int i = 0; i < columnCount; i++) {
-    if (initialState->combinedColumns[i] == NONE || columns[i] == NONE) {
+    if (initialState->combinedColumns[i] == Foot_None ||
+        columns[i] == Foot_None) {
       continue;
     }
 
@@ -408,12 +386,13 @@ float StepParityCost::calcFootswitchCost(
 }
 
 float StepParityCost::calcSideswitchCost(
-    State* initialState, State* resultState, const FootPlacement& columns,
-    int columnCount) {
+    const State* initialState, const State* resultState,
+    const FootPlacement& columns) {
   float cost = 0;
   for (auto c : layout->sideArrows) {
-    if (initialState->combinedColumns[c] != columns[c] && columns[c] != NONE &&
-        initialState->combinedColumns[c] != NONE &&
+    if (initialState->combinedColumns[c] != columns[c] &&
+        columns[c] != Foot_None &&
+        initialState->combinedColumns[c] != Foot_None &&
         !resultState->didTheFootMove[initialState->combinedColumns[c]]) {
       cost += SIDESWITCH;
     }
@@ -425,7 +404,7 @@ float StepParityCost::calcSideswitchCost(
 // Add a penalty when they get faster than 16ths at 150bpm (0.1 seconds)
 float StepParityCost::calcJackCost(
     bool movedLeft, bool movedRight, bool jackedLeft, bool jackedRight,
-    float elapsedTime, int columnCount) {
+    float elapsedTime) {
   float cost = 0;
   // weighting for jacking two notes too close to eachother
   if (elapsedTime < JACK_THRESHOLD && movedLeft != movedRight) {
@@ -439,8 +418,7 @@ float StepParityCost::calcJackCost(
 }
 
 float StepParityCost::calcBigMovementsQuicklyCost(
-    State* initialState, State* resultState, float elapsedTime,
-    int columnCount) {
+    const State* initialState, const State* resultState, float elapsedTime) {
   float cost = 0;
   for (StepParity::Foot foot : FEET) {
     if ((resultState->moved_mask & FOOT_MASKS[foot]) == 0) {
@@ -481,28 +459,26 @@ float StepParityCost::calcBigMovementsQuicklyCost(
 }
 
 bool StepParityCost::didDoubleStep(
-    State* initialState, State* resultState, std::vector<Row>& rows,
-    int rowIndex, bool movedLeft, bool jackedLeft, bool movedRight,
-    bool jackedRight, int columnCount) {
-  Row& row = rows[rowIndex];
+    const State* initialState, const Row& row, const Row* previousRow,
+    bool movedLeft, bool jackedLeft, bool movedRight, bool jackedRight) {
   bool doublestepped = false;
   if (movedLeft && !jackedLeft &&
-      ((initialState->didTheFootMove[LEFT_HEEL] &&
-        !initialState->isTheFootHolding[LEFT_HEEL]) ||
-       (initialState->didTheFootMove[LEFT_TOE] &&
-        !initialState->isTheFootHolding[LEFT_TOE]))) {
+      ((initialState->didTheFootMove[Foot_LeftHeel] &&
+        !initialState->isTheFootHolding[Foot_LeftHeel]) ||
+       (initialState->didTheFootMove[Foot_LeftToe] &&
+        !initialState->isTheFootHolding[Foot_LeftToe]))) {
     doublestepped = true;
   }
   if (movedRight && !jackedRight &&
-      ((initialState->didTheFootMove[RIGHT_HEEL] &&
-        !initialState->isTheFootHolding[RIGHT_HEEL]) ||
-       (initialState->didTheFootMove[RIGHT_TOE] &&
-        !initialState->isTheFootHolding[RIGHT_TOE]))) {
+      ((initialState->didTheFootMove[Foot_RightHeel] &&
+        !initialState->isTheFootHolding[Foot_RightHeel]) ||
+       (initialState->didTheFootMove[Foot_RightToe] &&
+        !initialState->isTheFootHolding[Foot_RightToe]))) {
     doublestepped = true;
   }
 
-  if (rowIndex - 1 > -1) {
-    StepParity::Row& lastRow = rows[rowIndex - 1];
+  if (previousRow != nullptr) {
+    const StepParity::Row& lastRow = *previousRow;
     for (StepParity::IntermediateNoteData hold : lastRow.holds) {
       if (hold.type == TapNoteType_Empty) {
         continue;
@@ -525,26 +501,26 @@ bool StepParityCost::didDoubleStep(
 }
 
 bool StepParityCost::didJackLeft(
-    State* initialState, State* resultState, int leftHeel, int leftToe,
-    bool movedLeft, bool didJump, int columnCount) {
+    const State* initialState, const State* resultState, int leftHeel,
+    int leftToe, bool movedLeft, bool didJump) {
   bool jackedLeft = false;
   if (!didJump && movedLeft) {
     if (leftHeel > INVALID_COLUMN &&
-        initialState->combinedColumns[leftHeel] == LEFT_HEEL &&
-        !resultState->isTheFootHolding[LEFT_HEEL] &&
-        ((initialState->didTheFootMove[LEFT_HEEL] &&
-          !initialState->isTheFootHolding[LEFT_HEEL]) ||
-         (initialState->didTheFootMove[LEFT_TOE] &&
-          !initialState->isTheFootHolding[LEFT_TOE]))) {
+        initialState->combinedColumns[leftHeel] == Foot_LeftHeel &&
+        !resultState->isTheFootHolding[Foot_LeftHeel] &&
+        ((initialState->didTheFootMove[Foot_LeftHeel] &&
+          !initialState->isTheFootHolding[Foot_LeftHeel]) ||
+         (initialState->didTheFootMove[Foot_LeftToe] &&
+          !initialState->isTheFootHolding[Foot_LeftToe]))) {
       jackedLeft = true;
     }
     if (leftToe > INVALID_COLUMN &&
-        initialState->combinedColumns[leftToe] == LEFT_TOE &&
-        !resultState->isTheFootHolding[LEFT_TOE] &&
-        ((initialState->didTheFootMove[LEFT_HEEL] &&
-          !initialState->isTheFootHolding[LEFT_HEEL]) ||
-         (initialState->didTheFootMove[LEFT_TOE] &&
-          !initialState->isTheFootHolding[LEFT_TOE]))) {
+        initialState->combinedColumns[leftToe] == Foot_LeftToe &&
+        !resultState->isTheFootHolding[Foot_LeftToe] &&
+        ((initialState->didTheFootMove[Foot_LeftHeel] &&
+          !initialState->isTheFootHolding[Foot_LeftHeel]) ||
+         (initialState->didTheFootMove[Foot_LeftToe] &&
+          !initialState->isTheFootHolding[Foot_LeftToe]))) {
       jackedLeft = true;
     }
   }
@@ -552,26 +528,26 @@ bool StepParityCost::didJackLeft(
 }
 
 bool StepParityCost::didJackRight(
-    State* initialState, State* resultState, int rightHeel, int rightToe,
-    bool movedRight, bool didJump, int columnCount) {
+    const State* initialState, const State* resultState, int rightHeel,
+    int rightToe, bool movedRight, bool didJump) {
   bool jackedRight = false;
   if (!didJump && movedRight) {
     if (rightHeel > INVALID_COLUMN &&
-        initialState->combinedColumns[rightHeel] == RIGHT_HEEL &&
-        !resultState->isTheFootHolding[RIGHT_HEEL] &&
-        ((initialState->didTheFootMove[RIGHT_HEEL] &&
-          !initialState->isTheFootHolding[RIGHT_HEEL]) ||
-         (initialState->didTheFootMove[RIGHT_TOE] &&
-          !initialState->isTheFootHolding[RIGHT_TOE]))) {
+        initialState->combinedColumns[rightHeel] == Foot_RightHeel &&
+        !resultState->isTheFootHolding[Foot_RightHeel] &&
+        ((initialState->didTheFootMove[Foot_RightHeel] &&
+          !initialState->isTheFootHolding[Foot_RightHeel]) ||
+         (initialState->didTheFootMove[Foot_RightToe] &&
+          !initialState->isTheFootHolding[Foot_RightToe]))) {
       jackedRight = true;
     }
     if (rightToe > INVALID_COLUMN &&
-        initialState->combinedColumns[rightToe] == RIGHT_TOE &&
-        !resultState->isTheFootHolding[RIGHT_TOE] &&
-        ((initialState->didTheFootMove[RIGHT_HEEL] &&
-          !initialState->isTheFootHolding[RIGHT_HEEL]) ||
-         (initialState->didTheFootMove[RIGHT_TOE] &&
-          !initialState->isTheFootHolding[RIGHT_TOE]))) {
+        initialState->combinedColumns[rightToe] == Foot_RightToe &&
+        !resultState->isTheFootHolding[Foot_RightToe] &&
+        ((initialState->didTheFootMove[Foot_RightHeel] &&
+          !initialState->isTheFootHolding[Foot_RightHeel]) ||
+         (initialState->didTheFootMove[Foot_RightToe] &&
+          !initialState->isTheFootHolding[Foot_RightToe]))) {
       jackedRight = true;
     }
   }

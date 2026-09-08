@@ -21,6 +21,7 @@
 #include "EnumHelper.h"
 #include "GameConstantsAndTypes.h"
 #include "GameManager.h"
+#include "GameState.h"
 #include "Group.h"
 #include "ImageCache.h"
 #include "LuaManager.h"
@@ -65,7 +66,7 @@
  * @brief The internal version of the cache for StepMania.
  *
  * Increment this value to invalidate the current cache. */
-const int FILE_CACHE_VERSION = 230;
+const int FILE_CACHE_VERSION = 232;
 
 /** @brief How long does a song sample last by default? */
 const float DEFAULT_MUSIC_SAMPLE_LENGTH = 12.f;
@@ -131,27 +132,40 @@ void Song::DetachSteps() {
   m_UnknownStyleSteps.clear();
 }
 
-float Song::GetFirstSecond() const { return this->firstSecond; }
+float Song::GetFirstSecond() const {
+  return GetFirstSecondNoOffset() -
+         GAMESTATE->m_SongOptions.GetCurrent().m_fMusicRate *
+             PREFSMAN->m_fGlobalOffsetSeconds;
+}
 
 float Song::GetFirstBeat() const {
-  return this->m_SongTiming.GetBeatFromElapsedTime(this->firstSecond);
+  return this->m_SongTiming.GetBeatFromElapsedTimeNoOffset(this->firstSecond);
 }
 
-float Song::GetLastSecond() const { return this->lastSecond; }
+float Song::GetLastSecond() const {
+  return GetLastSecondNoOffset() -
+         GAMESTATE->m_SongOptions.GetCurrent().m_fMusicRate *
+             PREFSMAN->m_fGlobalOffsetSeconds;
+}
 
 float Song::GetLastBeat() const {
-  return this->m_SongTiming.GetBeatFromElapsedTime(this->lastSecond);
+  return this->m_SongTiming.GetBeatFromElapsedTimeNoOffset(this->lastSecond);
 }
+
+float Song::GetSpecifiedLastBeat() const {
+  return this->m_SongTiming.GetBeatFromElapsedTimeNoOffset(
+      this->specifiedLastSecond);
+}
+
+float Song::GetFirstSecondNoOffset() const { return this->firstSecond; }
+
+float Song::GetLastSecondNoOffset() const { return this->lastSecond; }
 
 float Song::GetSpecifiedLastSecond() const { return this->specifiedLastSecond; }
 
-float Song::GetSpecifiedLastBeat() const {
-  return this->m_SongTiming.GetBeatFromElapsedTime(this->specifiedLastSecond);
-}
+void Song::SetFirstSecondNoOffset(const float f) { this->firstSecond = f; }
 
-void Song::SetFirstSecond(const float f) { this->firstSecond = f; }
-
-void Song::SetLastSecond(const float f) { this->lastSecond = f; }
+void Song::SetLastSecondNoOffset(const float f) { this->lastSecond = f; }
 
 void Song::SetSpecifiedLastSecond(const float f) {
   this->specifiedLastSecond = f;
@@ -314,14 +328,6 @@ bool Song::LoadFromSongDir(
     SSCLoader loaderSSC;
     bool bLoadedFromCache =
         loaderSSC.LoadFromSimfile(cache_file_path, *this, true);
-    if (!bLoadedFromCache) {
-      // load from .sm
-      SMLoader loaderSM;
-      if (loaderSM.LoadFromSimfile(cache_file_path, *this, true)) {
-        loaderSM.TidyUpData(*this, true);
-        bLoadedFromCache = true;
-      }
-    }
 
     // If cache loading failed entirely (e.g. stale dir cache says cache file
     // exists after it was removed), fall back to parsing source files.
@@ -342,7 +348,7 @@ bool Song::LoadFromSongDir(
           m_sSongDir.c_str());
       // Tell TidyUpData that it's not loaded from the cache because it needs
       // to hit the song folder to find the files that weren't found. -Kyz
-      TidyUpData(false, false);
+      TidyUpData(false);
     }
   }
 
@@ -354,8 +360,7 @@ bool Song::LoadFromSongDir(
 
     if (!NotesLoader::LoadFromDir(
             sDir, *this, blacklistedImages, load_autosave)) {
-      LOG->UserLog(
-          "Song", sDir, "has no SSC, SM, SMA, DWI, BMS, or KSF files.");
+      LOG->UserLog("Song", sDir, "has no SSC, SM, SMA, or DWI files.");
 
       std::vector<std::string> audios;
       FILEMAN->GetDirListingWithMultipleExtensions(
@@ -380,7 +385,7 @@ bool Song::LoadFromSongDir(
     // loading time. -Kyz
     LoadEditsFromSongDir(sDir);
 
-    TidyUpData(false, true, blacklistedImages);
+    TidyUpData(false, blacklistedImages);
     // Don't save a cache file if the autosave is being loaded, because the
     // cache file would contain the autosave filename. -Kyz
     // Songs loaded from removable profile are never cached, on the
@@ -642,14 +647,13 @@ void FixupPath(std::string& path, const std::string& sSongPath) {
   Trim(path);
 }
 
-void Song::TidyUpData(bool from_cache, bool duringCache) {
-  Song::TidyUpData(from_cache, duringCache, std::set<std::string>());
+void Song::TidyUpData(bool from_cache) {
+  Song::TidyUpData(from_cache, std::set<std::string>());
 }
 
 // Songs in BlacklistImages will never be autodetected as song images.
 void Song::TidyUpData(
-    bool from_cache, bool /* duringCache */,
-    const std::set<std::string>& blacklistedImages) {
+    bool from_cache, const std::set<std::string>& blacklistedImages) {
   // We need to do this before calling any of HasMusic, HasHasCDTitle, etc.
   ASSERT_M(Left(m_sSongDir, 3) != "../", m_sSongDir);  // meaningless
   FixupPath(m_sSongDir, "");
@@ -864,17 +868,18 @@ void Song::TidyUpData(
           m_fMusicSampleStartSeconds + m_fMusicSampleLengthSeconds >
               this->m_fMusicLengthSeconds) {
         const TimingData& timing = this->m_SongTiming;
-        m_fMusicSampleStartSeconds = timing.GetElapsedTimeFromBeat(100);
+        m_fMusicSampleStartSeconds = timing.GetElapsedTimeFromBeatNoOffset(100);
 
         if (m_fMusicSampleStartSeconds + m_fMusicSampleLengthSeconds >
             this->m_fMusicLengthSeconds) {
           // Attempt to get a reasonable default.
           int iBeat = std::lrint(
-              this->m_SongTiming.GetBeatFromElapsedTime(this->GetLastSecond()) /
+              this->m_SongTiming.GetBeatFromElapsedTimeNoOffset(
+                  this->GetLastSecondNoOffset()) /
               2);
           iBeat -= iBeat % 4;
           m_fMusicSampleStartSeconds =
-              timing.GetElapsedTimeFromBeat((float)iBeat);
+              timing.GetElapsedTimeFromBeatNoOffset((float)iBeat);
         }
       }
 
@@ -1124,8 +1129,11 @@ void Song::TidyUpData(
   }
 
   /* Generate these before we autogen notes, so the new notes can inherit
-   * their source's values. */
-  ReCalculateStepStatsAndLastSecond(from_cache, true);
+   * their source's values. On cache loads the stats and first/last second
+   * already came from the cache file -- nothing to recalculate. */
+  if (!from_cache) {
+    ReCalculateStepStatsAndLastSecond(true);
+  }
   // If the music length is suspiciously shorter than the last second, adjust
   // the length.  This prevents the ogg patch from setting a false length. -Kyz
   if (m_fMusicLengthSeconds < lastSecond - 10.0f) {
@@ -1146,16 +1154,7 @@ void Song::TranslateTitles() {
       m_sSubTitleTranslit, m_sArtistTranslit);
 }
 
-void Song::ReCalculateStepStatsAndLastSecond(bool fromCache, bool duringCache) {
-  if (fromCache && this->GetFirstSecond() >= 0 && this->GetLastSecond() > 0) {
-    // this is loaded from cache, then we just have to calculate the radar
-    // values.
-    for (unsigned i = 0; i < m_vpSteps.size(); i++) {
-      m_vpSteps[i]->CalculateStepStats(m_fMusicLengthSeconds);
-    }
-    return;
-  }
-
+void Song::ReCalculateStepStatsAndLastSecond(bool wipeNoteData) {
   float localFirst = FLT_MAX;  // inf
   // Make sure we're at least as long as the specified amount below.
   float localLast = this->specifiedLastSecond;
@@ -1185,16 +1184,16 @@ void Song::ReCalculateStepStatsAndLastSecond(bool fromCache, bool duringCache) {
        * don't force the first beat of the whole song to 0. */
       if (tempNoteData.GetLastRow() != 0) {
         localFirst = std::min(
-            localFirst, pSteps->GetTimingData()->GetElapsedTimeFromBeat(
+            localFirst, pSteps->GetTimingData()->GetElapsedTimeFromBeatNoOffset(
                             tempNoteData.GetFirstBeat()));
         localLast = std::max(
-            localLast, pSteps->GetTimingData()->GetElapsedTimeFromBeat(
+            localLast, pSteps->GetTimingData()->GetElapsedTimeFromBeatNoOffset(
                            tempNoteData.GetLastBeat()));
       }
     }
 
     // Wipe NoteData
-    if (duringCache) {
+    if (wipeNoteData) {
       NoteData dummy;
       dummy.SetNumTracks(tempNoteData.GetNumTracks());
       pSteps->SetNoteData(dummy);
@@ -1222,7 +1221,7 @@ bool Song::HasStepsTypeAndDifficulty(StepsType st, Difficulty dc) const {
 void Song::Save(bool autosave) {
   LOG->Trace("Song::SaveToSongFile()");
 
-  ReCalculateStepStatsAndLastSecond();
+  ReCalculateStepStatsAndLastSecond(false);
   TranslateTitles();
 
   // Save the new files. These calls make backups on their own.
@@ -1239,26 +1238,6 @@ void Song::Save(bool autosave) {
   // saved in the .sm format.  So saving the .sm is disabled.
   if (!AnyChartUsesSplitTiming()) {
     SaveToSMFile();
-  }
-  // SaveToDWIFile();
-
-  /* We've safely written our files and created backups. Rename non-SM and
-   * non-DWI files to avoid confusion. */
-  std::vector<std::string> arrayOldFileNames;
-  GetDirListing(m_sSongDir + "*.bms", arrayOldFileNames);
-  GetDirListing(m_sSongDir + "*.pms", arrayOldFileNames);
-  GetDirListing(m_sSongDir + "*.ksf", arrayOldFileNames);
-
-  for (unsigned i = 0; i < arrayOldFileNames.size(); i++) {
-    const std::string sOldPath = m_sSongDir + arrayOldFileNames[i];
-    const std::string sNewPath = sOldPath + ".old";
-
-    if (!FileCopy(sOldPath, sNewPath)) {
-      LOG->UserLog("Song file", sOldPath, "couldn't be backed up.");
-      // Don't remove.
-    } else {
-      FILEMAN->Remove(sOldPath);
-    }
   }
 }
 
@@ -1429,8 +1408,7 @@ void Song::AddAutoGenNotes() {
       continue;
     }
 
-    // If m_bAutogenSteps is disabled, only autogen lights.
-    if (!PREFSMAN->m_bAutogenSteps && stMissing != StepsType_lights_cabinet) {
+    if (!PREFSMAN->m_bAutogenSteps) {
       continue;
     }
     if (!GAMEMAN->GetStepsTypeInfo(stMissing).bAllowAutogen) {
@@ -2013,7 +1991,7 @@ bool Song::HasSignificantBpmChangesOrStops() const {
 }
 
 float Song::GetStepsSeconds() const {
-  return this->GetLastSecond() - this->GetFirstSecond();
+  return this->GetLastSecondNoOffset() - this->GetFirstSecondNoOffset();
 }
 
 bool Song::IsLong() const {

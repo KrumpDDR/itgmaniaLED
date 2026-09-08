@@ -104,17 +104,15 @@ class Song {
 
   /**
    * @brief Call this after loading a song to clean up invalid data.
-   * @param fromCache was this data loaded from the cache file?
-   * @param duringCache was this data loaded during the cache process? */
-  void TidyUpData(bool fromCache = false, bool duringCache = false);
+   * @param fromCache was this data loaded from the cache file? */
+  void TidyUpData(bool fromCache = false);
 
   /**
    * @brief Get the new step stats, and determine the last second at the same
    * time. This is called by TidyUpData, after saving the Song.
-   * @param fromCache was this data loaded from the cache file?
-   * @param duringCache was this data loaded during the cache process? */
-  void ReCalculateStepStatsAndLastSecond(
-      bool fromCache = false, bool duringCache = false);
+   * @param wipeNoteData release each chart's decompressed NoteData after
+   * computing its stats. */
+  void ReCalculateStepStatsAndLastSecond(bool wipeNoteData);
   /**
    * @brief Translate any titles that aren't in english.
    * This is called by TidyUpData. */
@@ -315,14 +313,17 @@ class Song {
   TimingData m_SongTiming;
 
   float GetFirstBeat() const;
+  float GetFirstSecondNoOffset() const;
   float GetFirstSecond() const;
   float GetLastBeat() const;
+  float GetLastSecondNoOffset() const;
   float GetLastSecond() const;
   float GetSpecifiedLastBeat() const;
+
   float GetSpecifiedLastSecond() const;
 
-  void SetFirstSecond(const float f);
-  void SetLastSecond(const float f);
+  void SetFirstSecondNoOffset(const float f);
+  void SetLastSecondNoOffset(const float f);
   void SetSpecifiedLastSecond(const float f);
 
   typedef std::vector<BackgroundChange> VBackgroundChange;
@@ -352,8 +353,7 @@ class Song {
       const std::vector<BackgroundChange>& changes) const;
 
   void TidyUpData(
-      bool fromCache, bool duringCache,
-      const std::set<std::string>& blacklistedImages);
+      bool fromCache, const std::set<std::string>& blacklistedImages);
 
  public:
   const std::vector<BackgroundChange>& GetBackgroundChanges(

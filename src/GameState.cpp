@@ -190,6 +190,7 @@ GameState::GameState()
   m_bDopefish = false;
   sLastOpenSection = "";
   sExpandedSectionName = "";
+  sExpandedParentSectionName = "";
 
   // Don't reset yet; let the first screen do it, so we can use PREFSMAN and
   // THEME.
@@ -371,6 +372,7 @@ void GameState::Reset() {
   m_bBackedOutOfFinalStage = false;
   m_bEarnedExtraStage = false;
   sExpandedSectionName = "";
+  sExpandedParentSectionName = "";
 
   ApplyCmdline();
 }
@@ -441,8 +443,7 @@ void GameState::JoinPlayer(PlayerNumber pn) {
     // -aj
     if (cur_style->m_StyleType == StyleType_OnePlayerTwoSides ||
         cur_style->m_StepsType == StepsType_dance_solo ||
-        cur_style->m_StepsType == StepsType_dance_threepanel ||
-        cur_style->m_StepsType == StepsType_popn_nine) {
+        cur_style->m_StepsType == StepsType_dance_threepanel) {
       pStyle = GAMEMAN->GetFirstCompatibleStyle(
           m_pCurGame, 1, cur_style->m_StepsType);
     } else {
@@ -3107,6 +3108,11 @@ class LunaGameState : public Luna<GameState> {
     lua_pushstring(L, p->sExpandedSectionName.c_str());
     return 1;
   }
+
+  static int GetExpandedParentSectionName(T* p, lua_State* L) {
+    lua_pushstring(L, p->sExpandedParentSectionName.c_str());
+    return 1;
+  }
   static int AddStageToPlayer(T* p, lua_State* L) {
     p->AddStageToPlayer(Enum::Check<PlayerNumber>(L, 1));
     COMMON_RETURN_SELF;
@@ -3452,6 +3458,7 @@ class LunaGameState : public Luna<GameState> {
     ADD_METHOD(GetCharacter);
     ADD_METHOD(SetCharacter);
     ADD_METHOD(GetExpandedSectionName);
+    ADD_METHOD(GetExpandedParentSectionName);
     ADD_METHOD(AddStageToPlayer);
     ADD_METHOD(InsertCoin);
     ADD_METHOD(InsertCredit);

@@ -201,6 +201,8 @@ static Preference<TapNoteScore> g_MinTNSToScoreNotes(
     "MinTNSToScoreNotes", TNS_None,
     ValidateMinTNSToScoreNotes);  // Default to great and above.
 
+ThemeMetric<bool> TICK_HOLDS("Player", "TickHolds");
+
 /** @brief How much life is in a hold note when you start on it? */
 ThemeMetric<float> INITIAL_HOLD_LIFE("Player", "InitialHoldLife");
 /**
@@ -709,7 +711,7 @@ void Player::Load() {
   m_bLoaded = true;
 
   // Figured this is probably a little expensive so let's cache it
-  m_bTickHolds = GAMESTATE->GetCurrentGame()->m_bTickHolds;
+  m_bTickHolds = TICK_HOLDS;
 
   m_LastTapNoteScore = TNS_None;
   // The editor can start playing in the middle of the song.
@@ -749,6 +751,13 @@ void Player::Load() {
   //		m_pScore->Init( pn );
 
   m_Timing = GAMESTATE->m_pCurSteps[pn]->GetTimingData();
+
+  if (m_NoteData.IsComposite()) {
+    std::vector<NoteData> vParts;
+
+    NoteDataUtil::SplitCompositeNoteData(m_NoteData, vParts);
+    m_NoteData = vParts[pn];
+  }
 
   /* Apply transforms. */
   NoteDataUtil::TransformNoteData(
@@ -1123,54 +1132,34 @@ void Player::Update(float fDeltaTime) {
 
   // Track held misses
   //
-  // In order to track held misses we have to check whether a note was
-  // held any time during the judgment window before it is judged a miss.
-  // Note: at this point we don't actually know yet whether a note will
-  // be a miss or a hit, so we have to track for all notes whether they
-  // were held at some point before getting judged.
+  // A miss is "held" if the player was physically holding the button at the
+  // note's exact timing point.
   {
-    float largestWindow = 0.0f;
-    const auto& disabledWindows =
-        m_pPlayerState->m_PlayerOptions.GetCurrent().m_twDisabledWindows;
-    if (!disabledWindows[TW_W1]) {
-      largestWindow = std::max(largestWindow, GetWindowSeconds(TW_W1));
-    }
-    if (!disabledWindows[TW_W2]) {
-      largestWindow = std::max(largestWindow, GetWindowSeconds(TW_W2));
-    }
-    if (!disabledWindows[TW_W3]) {
-      largestWindow = std::max(largestWindow, GetWindowSeconds(TW_W3));
-    }
-    if (!disabledWindows[TW_W4]) {
-      largestWindow = std::max(largestWindow, GetWindowSeconds(TW_W4));
-    }
-    if (!disabledWindows[TW_W5]) {
-      largestWindow = std::max(largestWindow, GetWindowSeconds(TW_W5));
-    }
-
-    // We have to check the unjudged notes that are within the
-    // timing window. Let's find the cutoff point! (lastCheckRow)
+    const float musicPosition = m_pPlayerState->m_Position.m_fMusicSeconds;
     const float rate = GAMESTATE->m_SongOptions.GetCurrent().m_fMusicRate;
-    const SongPosition songPosition = m_pPlayerState->m_Position;
-    const float musicPosition = songPosition.m_fMusicSeconds +
-                                (songPosition.m_LastBeatUpdate.Ago() * rate);
-    // We have to add 1 here, because GetBeatFromElapsedTime() can round down.
-    const int lastCheckRow = BeatToNoteRow(
-        m_Timing->GetBeatFromElapsedTime(
-            musicPosition + (largestWindow * rate)) +
-        1);
 
-    // The button being held only counts for the first unjudged
-    // note on a track (== column/arrow direction), so we have to
-    // keep track for which tracks we have already seen an unjudged
-    // note.
-    std::vector<bool> seenTracks(m_NoteData.GetNumTracks(), false);
+    // We have to add 1 here, because GetBeatFromElapsedTime() can round down.
+    const int lastCheckRow =
+        BeatToNoteRow(m_Timing->GetBeatFromElapsedTime(musicPosition) + 1);
 
     for (auto iter = *m_pIterNeedsTapJudging;
          !iter.IsAtEnd() && iter.Row() <= lastCheckRow; ++iter) {
       TapNote& tn = *iter;
       const int row = iter.Row();
       const int track = iter.Track();
+
+      const float notePosition =
+          m_Timing->GetElapsedTimeFromBeat(NoteRowToBeat(row));
+
+      // Check if we're looking at notes in the future we don't care about.
+      if (notePosition > musicPosition) {
+        break;
+      }
+
+      // Already determined this is held, don't un-mark it.
+      if (tn.result.bHeld) {
+        continue;
+      }
 
       // Skip over warp and fake segments
       if (!m_Timing->IsJudgableAtRow(row)) {
@@ -1182,31 +1171,24 @@ void Player::Update(float fDeltaTime) {
         continue;
       }
 
-      const float notePosition =
-          m_Timing->GetElapsedTimeFromBeat(NoteRowToBeat(row));
-      const float offset = std::abs((notePosition - musicPosition) / rate);
-
-      // Skip if we are outside of the largest timing window
-      if (offset > largestWindow) {
+      // Skip notes already judged (e.g. hit notes in a jump).
+      if (!NeedsTapJudging(tn)) {
         continue;
       }
 
-      // Skip the note if there is an earlier note on the same track that still
-      // awaits judgement
-      if (seenTracks[track]) {
-        continue;
+      PlayerNumber pn = m_pPlayerState->m_PlayerNumber;
+      std::vector<GameInput> inputs;
+      GAMESTATE->GetCurrentStyle(pn)->StyleInputToGameInput(track, pn, inputs);
+
+      // Button must have been held continuously since at least the note time
+      // (max time of all inputs mapped to this column).
+      const float secsSinceNote = (musicPosition - notePosition) / rate;
+      float maxSecsHeld = 0.0f;
+      for (const GameInput& gi : inputs) {
+        maxSecsHeld = std::max(
+            maxSecsHeld, INPUTMAPPER->GetSecsHeld(gi, m_pPlayerState->m_mp));
       }
-
-      seenTracks[track] = true;
-
-      if (!tn.result.bHeld) {
-        PlayerNumber pn = m_pPlayerState->m_PlayerNumber;
-        std::vector<GameInput> input;
-        GAMESTATE->GetCurrentStyle(pn)->StyleInputToGameInput(track, pn, input);
-
-        tn.result.bHeld =
-            INPUTMAPPER->IsBeingPressed(input, m_pPlayerState->m_mp);
-      }
+      tn.result.bHeld = maxSecsHeld >= secsSinceNote;
     }
   }
 
@@ -1346,6 +1328,12 @@ void Player::UpdateHoldNotes(
      * in different ways depending on the SubType. */
     ASSERT(tn.subType == subType);
 
+    // Routine charts assign each note to a specific player; skip notes
+    // that don't belong to this Player
+    if (tn.pn != PLAYER_INVALID && tn.pn != m_pPlayerState->m_PlayerNumber) {
+      continue;
+    }
+
     if (iEndRow > iMaxEndRow) {
       iMaxEndRow = iEndRow;
       iFirstTrackWithMaxEndRow = iTrack;
@@ -1361,7 +1349,11 @@ void Player::UpdateHoldNotes(
 
   for (const TrackRowTapNote& trtn : vTN) {
     TapNote& tn = *trtn.pTN;
-
+    // Routine charts assign each note to a specific player; skip notes
+    // that don't belong to this Player
+    if (tn.pn != PLAYER_INVALID && tn.pn != m_pPlayerState->m_PlayerNumber) {
+      continue;
+    }
     // set hold flags so NoteField can do intelligent drawing
     tn.HoldResult.bHeld = false;
     tn.HoldResult.bActive = false;
@@ -1402,6 +1394,11 @@ void Player::UpdateHoldNotes(
   for (const TrackRowTapNote& trtn : vTN) {
     TapNote& tn = *trtn.pTN;
     TapNoteScore tns = tn.result.tns;
+    // Routine charts assign each note to a specific player; skip notes
+    // that don't belong to this Player
+    if (tn.pn != PLAYER_INVALID && tn.pn != m_pPlayerState->m_PlayerNumber) {
+      continue;
+    }
     // LOG->Trace( ssprintf("[C++] tap note score:
     // %s",StringConversion::ToString(tns).c_str()) );
 
@@ -1486,7 +1483,11 @@ void Player::UpdateHoldNotes(
     for (const TrackRowTapNote& trtn : vTN) {
       TapNote& tn = *trtn.pTN;
       int iEndRow = iStartRow + tn.iDuration;
-
+      // Routine charts assign each note to a specific player; skip notes
+      // that don't belong to this Player
+      if (tn.pn != PLAYER_INVALID && tn.pn != m_pPlayerState->m_PlayerNumber) {
+        continue;
+      }
       // LOG->Trace(ssprintf("trying for min between iSongRow (%i) and iEndRow
       // (%i) (duration %i)",iSongRow,iEndRow,tn.iDuration));
       tn.HoldResult.iLastHeldRow = std::min(iSongRow, iEndRow);
@@ -1499,7 +1500,10 @@ void Player::UpdateHoldNotes(
       case TapNoteSubType_Hold:
         for (const TrackRowTapNote& trtn : vTN) {
           TapNote& tn = *trtn.pTN;
-
+          if (tn.pn != PLAYER_INVALID &&
+              tn.pn != m_pPlayerState->m_PlayerNumber) {
+            continue;
+          }
           // set hold flag so NoteField can do intelligent drawing
           tn.HoldResult.bHeld = bIsHoldingButton && bInitiatedNote;
           tn.HoldResult.bActive = bInitiatedNote;
@@ -1535,6 +1539,10 @@ void Player::UpdateHoldNotes(
       case TapNoteSubType_Roll:
         for (const TrackRowTapNote& trtn : vTN) {
           TapNote& tn = *trtn.pTN;
+          if (tn.pn != PLAYER_INVALID &&
+              tn.pn != m_pPlayerState->m_PlayerNumber) {
+            continue;
+          }
           tn.HoldResult.bHeld = true;
           tn.HoldResult.bActive = bInitiatedNote;
         }
@@ -1609,6 +1617,10 @@ void Player::UpdateHoldNotes(
       int iCheckpointsHit = 0;
       int iCheckpointsMissed = 0;
       for (const TrackRowTapNote& v : vTN) {
+        if (v.pTN->pn != PLAYER_INVALID &&
+            v.pTN->pn != m_pPlayerState->m_PlayerNumber) {
+          continue;
+        }
         iCheckpointsHit += v.pTN->HoldResult.iCheckpointsHit;
         iCheckpointsMissed += v.pTN->HoldResult.iCheckpointsMissed;
       }
@@ -1647,6 +1659,10 @@ void Player::UpdateHoldNotes(
                            (unsigned int)BRIGHT_GHOST_COMBO_THRESHOLD;
         if (m_pNoteField) {
           for (const TrackRowTapNote& trtn : vTN) {
+            if (trtn.pTN->pn != PLAYER_INVALID &&
+                trtn.pTN->pn != m_pPlayerState->m_PlayerNumber) {
+              continue;
+            }
             int iTrack = trtn.iTrack;
             m_pNoteField->DidHoldNote(
                 iTrack, HNS_Held, bBright);  // bright ghost flash
@@ -1668,6 +1684,11 @@ void Player::UpdateHoldNotes(
 
   for (const TrackRowTapNote& trtn : vTN) {
     TapNote& tn = *trtn.pTN;
+    // Routine charts assign each note to a specific player; skip notes
+    // that don't belong to this Player
+    if (tn.pn != PLAYER_INVALID && tn.pn != m_pPlayerState->m_PlayerNumber) {
+      continue;
+    }
     tn.HoldResult.fLife = fLife;
     tn.HoldResult.hns = hns;
     // Stop the playing keysound for the hold note.
@@ -1699,6 +1720,11 @@ void Player::UpdateHoldNotes(
   if (hns != HNS_None) {
     // LOG->Trace("tap note scoring time.");
     TapNote& tn = *vTN[0].pTN;
+    // Routine charts assign each note to a specific player; skip notes
+    // that don't belong to this Player
+    if (tn.pn != PLAYER_INVALID && tn.pn != m_pPlayerState->m_PlayerNumber) {
+      return;
+    }
     SetHoldJudgment(tn, iFirstTrackWithMaxEndRow);
     HandleHoldScore(tn);
     // LOG->Trace("hold result =
@@ -2232,6 +2258,37 @@ void Player::Step(
   }
 
   const int iSongRow = row == -1 ? BeatToNoteRow(fSongBeat) : row;
+  // If we're playinng on TwoPlayerSharedSides, we need to check player number
+  // to determine which side of the screen we're on.
+  if (GAMESTATE->GetCurrentStyle(m_pPlayerState->m_PlayerNumber)->m_StyleType ==
+      StyleType_TwoPlayersSharedSides) {
+    const int iStepSearchRows =
+        std::max(
+            BeatToNoteRow(m_Timing->GetBeatFromElapsedTime(
+                m_pPlayerState->m_Position.m_fMusicSeconds +
+                StepSearchDistance)) -
+                iSongRow,
+            iSongRow - BeatToNoteRow(m_Timing->GetBeatFromElapsedTime(
+                           m_pPlayerState->m_Position.m_fMusicSeconds -
+                           StepSearchDistance))) +
+        ROWS_PER_BEAT;
+    int iRowOfOverlappingNoteOrRow = row;
+    if (row == -1) {
+      iRowOfOverlappingNoteOrRow = GetClosestNote(
+          col, iSongRow, iStepSearchRows, iStepSearchRows, false);
+    }
+    if (iRowOfOverlappingNoteOrRow != -1) {
+      NoteData::iterator iter =
+          m_NoteData.FindTapNote(col, iRowOfOverlappingNoteOrRow);
+      if (iter != m_NoteData.end(col)) {
+        const TapNote& tn = iter->second;
+        if (tn.pn != PLAYER_INVALID &&
+            tn.pn != m_pPlayerState->m_PlayerNumber) {
+          return;
+        }
+      }
+    }
+  }
 
   if (col != -1 && !bRelease) {
     // Update roll life
@@ -2717,6 +2774,7 @@ void Player::Step(
             (score != TNS_Miss && !badTns)) {
           pTN->result.tns = score;
           pTN->result.fTapNoteOffset = -fNoteOffset;
+          pTN->result.bHeld = false;
         }
       }
     }

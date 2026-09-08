@@ -39,15 +39,7 @@ option(
   "Build without the ROLC assembly instructions for tomcrypt."
   OFF)
 
-# Turn this option on to log every segment added or removed.
-option(WITH_LOGGING_TIMING_DATA
-       "Build with logging all Add and Erase Segment calls." OFF)
-
-if(NOT MSVC)
-  # Change this number to utilize a different number of jobs for building
-  # FFMPEG.
-  option(WITH_FFMPEG_JOBS "Build FFMPEG with this many jobs." 2)
-else()
+if(MSVC)
   # Turn this option on to enable using the Texture Font Generator.
   option(
     WITH_TEXTURE_GENERATOR

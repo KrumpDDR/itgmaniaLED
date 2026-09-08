@@ -32,7 +32,8 @@ NoteType GetSmallestNoteTypeInRange(
     const NoteData& nd, int iStartIndex, int iEndIndex);
 void LoadFromSMNoteDataString(
     NoteData& out, const std::string& sSMNoteData, bool bComposite);
-void GetSMNoteDataString(const NoteData& in, std::string& notes_out);
+void GetSMNoteDataString(
+    const NoteData& in, std::string& notes_out, bool bIncludeMeasureComments);
 void SplitCompositeNoteData(const NoteData& in, std::vector<NoteData>& out);
 void CombineCompositeNoteData(NoteData& out, const std::vector<NoteData>& in);
 /**
@@ -57,13 +58,6 @@ void LoadTransformedLights(
 void LoadTransformedLightsFromTwo(
     const NoteData& marquee, const NoteData& bass, NoteData& out);
 void InsertHoldTails(NoteData& inout);
-
-// Special case so that kickbox can have autogen steps that are playable.
-// Hopefully I'll replace this with a good generalized autogen system
-// later.  -Kyz
-void AutogenKickbox(
-    const NoteData& in, NoteData& out, const TimingData& timing,
-    StepsType out_type, int nonrandom_seed);
 
 void CalculateRadarValues(
     const NoteData& in, float fSongSeconds, RadarValues& out);

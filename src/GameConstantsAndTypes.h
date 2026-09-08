@@ -85,33 +85,13 @@ enum StepsType {
   StepsType_pump_double,
   StepsType_pump_couple,
   StepsType_pump_routine,
-  StepsType_kb7_single,
-  StepsType_ez2_single,
-  StepsType_ez2_double,
-  StepsType_ez2_real,
-  StepsType_para_single,
-  StepsType_ds3ddx_single,
-  StepsType_beat_single5,
-  StepsType_beat_versus5,
-  StepsType_beat_double5,
-  StepsType_beat_single7,
-  StepsType_beat_versus7,
-  StepsType_beat_double7,
-  StepsType_maniax_single,
-  StepsType_maniax_double,
   StepsType_techno_single4,
   StepsType_techno_single5,
   StepsType_techno_single8,
   StepsType_techno_double4,
   StepsType_techno_double5,
   StepsType_techno_double8,
-  StepsType_popn_five,
-  StepsType_popn_nine,
   StepsType_lights_cabinet,
-  StepsType_kickbox_human,
-  StepsType_kickbox_quadarm,
-  StepsType_kickbox_insect,
-  StepsType_kickbox_arachnid,
   NUM_StepsType,  // leave this at the end
   StepsType_Invalid,
 };
@@ -203,6 +183,7 @@ enum SortOrder {
   SORT_RECENT,
   SORT_RECENT_P1, /**< Sort by the most recent play for P1. */
   SORT_RECENT_P2, /**< Sort by the most recent play for P2. */
+  SORT_SERIES,    /**< Sort by the series the Songs are in. */
   NUM_SortOrder,
   SortOrder_Invalid
 };

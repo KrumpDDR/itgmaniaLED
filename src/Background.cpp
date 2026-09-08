@@ -184,6 +184,7 @@ BackgroundImpl::BackgroundImpl() {
   m_bInitted = false;
   m_pDancingCharacters = nullptr;
   m_pSong = nullptr;
+  m_bDangerAllWasVisible = false;
 }
 
 BackgroundImpl::Layer::Layer() {
@@ -945,7 +946,10 @@ void BackgroundImpl::GetLoadedBackgroundChanges(
 
 bool BackgroundImpl::IsDangerAllVisible() {
   // The players are never in danger in FAIL_OFF.
-  FOREACH_PlayerNumber(p) if (
+  // Only consider enabled players. A disabled player's m_pCurSteps and
+  // PlayerOptions may be stale (e.g. when transitioning out of a screen
+  // where steps were temporarily assigned like in couples/routine editing)
+  FOREACH_EnabledPlayer(p) if (
       GAMESTATE->GetPlayerFailType(GAMESTATE->m_pPlayerState[p]) ==
       FailType_Off) return false;
   if (!g_bShowDanger) {

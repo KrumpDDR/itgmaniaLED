@@ -527,6 +527,17 @@ static std::string GetSSCNoteData(
     const std::vector<float>& peakNps = in.GetAllPeakNps();
     lines.push_back("#PEAKNPS:" + serialize(peakNps, "|", 3) + ";");
 
+    const std::vector<NoteAnnotationCache> noteAnnotations =
+        in.GetNoteAnnotationCaches();
+
+    std::vector<std::string> serializedAnnotations;
+    for (NoteAnnotationCache ann : noteAnnotations) {
+      const std::string seralizedAnn = ann.GetCompressed();
+      serializedAnnotations.push_back(seralizedAnn);
+    }
+    lines.push_back(ssprintf(
+        "#NOTEANNOTATIONS:%s;", join("|", serializedAnnotations).c_str()));
+
     std::string GrooveStatsHash = in.GetGrooveStatsHash();
     lines.push_back(ssprintf("#GROOVESTATSHASH:%s;", GrooveStatsHash.c_str()));
 
@@ -580,8 +591,8 @@ bool NotesWriterSSC::Write(
 
   if (bSavingCache) {
     f.PutLine(ssprintf("// cache tags:"));
-    f.PutLine(ssprintf("#FIRSTSECOND:%.6f;", out.GetFirstSecond()));
-    f.PutLine(ssprintf("#LASTSECOND:%.6f;", out.GetLastSecond()));
+    f.PutLine(ssprintf("#FIRSTSECOND:%.6f;", out.GetFirstSecondNoOffset()));
+    f.PutLine(ssprintf("#LASTSECOND:%.6f;", out.GetLastSecondNoOffset()));
     f.PutLine(
         ssprintf("#SONGFILENAME:%s;", SmEscape(out.m_sSongFileName).c_str()));
     f.PutLine(ssprintf("#HASMUSIC:%i;", out.m_bHasMusic));

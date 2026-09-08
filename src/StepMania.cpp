@@ -864,10 +864,6 @@ int sm_main(int argc, char* argv[]) {
    * that to appear delayed. */
   HOOKS->DumpDebugInfo();
 
-#if defined(HAVE_TLS)
-  LOG->Info("TLS is %savailable", RageThread::GetSupportsTLS() ? "" : "not ");
-#endif
-
   std::string luaDebugServerAddress;
   if (GetCommandlineArgument("lua-debugger", &luaDebugServerAddress)) {
     LUADEBUG = new LuaDebugManager();
@@ -1303,6 +1299,10 @@ void HandleInputEvents(float fDeltaTime) {
   // If we don't have focus, discard input.
   if (!HOOKS->AppHasFocus()) {
     return;
+  }
+
+  if (!ieArray.empty()) {
+    GameLoop::ResetInputIdleTimer();
   }
 
   for (unsigned i = 0; i < ieArray.size(); i++) {

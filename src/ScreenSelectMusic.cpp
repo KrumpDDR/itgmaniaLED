@@ -468,7 +468,8 @@ bool ScreenSelectMusic::Input(const InputEventPlus& input) {
       mouse_evt = true;
     }
   }
-  if (mouse_evt) {
+  if (mouse_evt && !(m_SelectionState == SelectionState_Finalized &&
+                     input.MenuI == GAME_BUTTON_START)) {
     return ScreenWithMenuElements::Input(input);
   }
   //	LOG->Trace( "ScreenSelectMusic::Input()" );
@@ -1007,9 +1008,7 @@ bool ScreenSelectMusic::DetectCodes(const InputEventPlus& input) {
         m_MusicWheel.WheelIsLocked() || m_MusicWheel.IsRouletting()) {
       m_soundLocked.Play(true);
     } else {
-      std::string sCurSection = m_MusicWheel.GetSelectedSection();
-      m_MusicWheel.SelectSection(sCurSection);
-      m_MusicWheel.SetOpenSection("");
+      m_MusicWheel.CloseOpenSectionOneLevel();
       AfterMusicChange();
     }
   } else {
@@ -1780,6 +1779,7 @@ void ScreenSelectMusic::AfterMusicChange() {
   SampleMusicPreviewMode pmode;
   switch (wtype) {
     case WheelItemDataType_Section:
+    case WheelItemDataType_ParentSection:
     case WheelItemDataType_Sort:
     case WheelItemDataType_Roulette:
     case WheelItemDataType_Random:
@@ -1801,10 +1801,15 @@ void ScreenSelectMusic::AfterMusicChange() {
 
       switch (wtype) {
         case WheelItemDataType_Section:
+        case WheelItemDataType_ParentSection:
           // reduce scope
           {
             SortOrder curSort = GAMESTATE->m_SortOrder;
-            if (curSort == SORT_GROUP) {
+            if (wtype == WheelItemDataType_ParentSection &&
+                curSort == SORT_SERIES) {
+              g_sBannerPath = SONGMAN->GetSeriesBannerPath(
+                  m_MusicWheel.GetSelectedSection());
+            } else if (curSort == SORT_GROUP || curSort == SORT_SERIES) {
               g_sBannerPath = SONGMAN->GetSongGroupBannerPath(
                   m_MusicWheel.GetSelectedSection());
             } else {
